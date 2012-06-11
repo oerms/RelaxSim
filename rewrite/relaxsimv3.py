@@ -390,17 +390,20 @@ class RelaxError(Exception):
 
 class RelaxCenters():
     """A class for the "sample": the positions of the paramagnetic centers, and other constants."""
-    def __init__(self, size, density, C, D, b, distribution="homogeneous",halo_rad=5e-9,name=""):
+    def __init__(self, size, density, C, D, b, distribution="homogeneous",halo_rad=5e-9,name="",centers=None):
         """constructor
 
         input:
-            density     centers per m^2         float
-            size        side length in meter    float
-            C           m^6/s                   float
-            D           m^2/s                   float
-            b           m                       float
+            density     centers per m^2
+            size        side length in meter
+            C           m^6/s  
+            D           m^2/s
+            b           m
         optional input:
             distribution    "homogenous", "clustered", etc.
+            halo_rad    m
+            name                                string
+            centers     in percent-triples      float numpy array
                 
         output:
             self.centers    array of real centers' positions"""
@@ -416,23 +419,29 @@ class RelaxCenters():
         # numbers of centers in center box
         self.center_number = int(density*size**3)
         print "Number of centers:",self.center_number
-                
-        if self.distribution == "homogeneous" or self.distribution == 'hom':
-            self.name = self.name + "hom" + "cen"
-            self.center_positions = self.size*rnd.rand(self.center_number,3)
-        elif self.distribution == 'clustered' or self.distribution == 'clu':
-            x = rnd.normal(self.size/2.,halo_rad,self.center_number)
-            y = rnd.normal(self.size/2.,halo_rad,self.center_number)
-            fold_back_C(x,np.array([self.size]))
-            fold_back_C(y,np.array([self.size]))
-            print size,max(x)
-            print size,min(x)
-            z = rnd.rand(self.center_number)*self.size
-            self.center_positions = np.array([x,y,z]).transpose()
+        
+        if centers != None:
+            if self.distribution == "homogeneous" or self.distribution == 'hom':
+                self.name = self.name + "hom" + "cen"
+                self.center_positions = self.size*rnd.rand(self.center_number,3)
+            elif self.distribution == 'clustered' or self.distribution == 'clu':
+                x = rnd.normal(self.size/2.,halo_rad,self.center_number)
+                y = rnd.normal(self.size/2.,halo_rad,self.center_number)
+                fold_back_C(x,np.array([self.size]))
+                fold_back_C(y,np.array([self.size]))
+                print size,max(x)
+                print size,min(x)
+                z = rnd.rand(self.center_number)*self.size
+                self.center_positions = np.array([x,y,z]).transpose()
+            else:
+                print "Distribution not supported yet, generating homogeneous distribution."
         else:
-            print "Distribution not supported yet, generating homogeneous distribution."
+            if type(centers)==type(np.array(1)):
+                fold_back_C(centers,np.array([self.size]))
+                self.center_positions = centers*self.size
+            else:
+                raise RelaxError(2,"centers in RelaxCenters._init_() is not a numpy array!")
             
-        #print "generated center distribution. number of centers:",num_cen
         print "initiated centers in {0:.0f}s.".format(t_inicen-t.time())
     
     def __str__(self,show='all'):
