@@ -437,12 +437,11 @@ class RelaxCenters():
                 print "Distribution not supported yet, generating homogeneous distribution."
         else:
             if type(centers)==type(np.array(1)):
+                fold_back_C(centers,np.array([self.size]))
                 self.center_positions = centers*self.size
-                fold_back_C(self.center_positions,np.array([self.size]))
             else:
                 raise RelaxError(2,"centers in RelaxCenters._init_() is not a numpy array!")
             
-        #print "generated center distribution. number of centers:",num_cen
         print "initiated centers in {0:.0f}s.".format(t_inicen-t.time())
     
     def __str__(self,show='all'):
