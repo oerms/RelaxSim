@@ -1,0 +1,598 @@
+# utility functions for random walk relaxation simulation
+
+import time as t
+import sys
+import numpy as np
+import math
+import random as rnd; rnd.seed()
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.ticker as tick
+from matplotlib import cm
+# inline C code
+from instant import inline_with_numpy
+# a progress bar from the internets
+from progress import *
+# save/load objects to file
+import pickle
+
+class RWError(Exception):
+    """A simple Error class for Random Walks"""
+    def __init__(self,err_code,err):
+        self.err = err
+        self.err_code = err_code
+    def __str__(self):
+        return self.err
+
+# random walk with relaxating magnetization
+
+def relax_rw(rndnos, pos, magn, rel_cen, consts):
+    """Uniform random walk with relaxating magnetization.
+    Parameters:
+        rndnos      random numbers for steps    len = 3*steps (unit step len)
+        pos         position vector             len = 3*(steps+1)
+        magn        magnetization               len = steps+1
+        rel_cen     relaxation centers          real positions
+        consts      constants D, C, b, b0, step_len
+                                                in respective SI base units
+
+    Returns last_step, where the walker comes to rest
+    
+    throws RWError
+    magn contains the magnetization"""
+    # define lengths of arrays and unpack consts (might slow down)
+    lenrnd  = len(rndnos)
+    lenpos  = len(pos)
+    lenmagn = len(magn)
+    numcen  = len(rel_cen)/3
+    Dconst  = consts[0]
+    Cconst  = consts[1]
+    brad    = consts[2]
+    b0rad   = consts[3]
+    step_len= consts[4]
+    dt      = consts[5]
+    # check lengths
+    if (len(pos)-3 != len(rndnos)):
+        raise RWError(1,"pos/rnd lengths do not match!")
+    if (len(magn)*3 != len(pos)):
+        raise RWError(2,"magn/pos lengths do not match!")
+    # convert unit steps to real step length
+    rndnos *= step_len
+
+    last_step = len(magn)
+    # start the steps
+    for i in range(len(magn)-1):
+        make_step = True
+        # accumulate information
+        rel = accum_rate_C(rel_cen,np.array([brad]),pos[3*i:3*i+3])
+        if rel == -1 :
+            make_step = False  # turn stepping off, if inside a radius
+            rel = accum_rate_P(rel_cen,np.array([brad]),pos[3*i:3*i+3],exit=False)
+        rel_fac = 1.-(dt*Cconst*rel)           # apply relaxation rate
+        if rel_fac < 0:     # this clamp generally is not necessary
+            rel_fac = 0
+        magn[i+1] = magn[i]*rel_fac # relaxate
+        if make_step:
+            pos[3*i+3] = pos[3*i  ]+rndnos[3*i  ] # make the step
+            pos[3*i+4] = pos[3*i+1]+rndnos[3*i+1]
+            pos[3*i+5] = pos[3*i+2]+rndnos[3*i+2]
+        else :
+            last_step = i
+            #print "step number",i,": do it with mult"
+            #print "relax factors:",rel_fac,rel,dt*Cconst*rel,1.-Cconst*rel*dt
+            pos[3*i+3::3] = pos[3*i]              # do not step anymore
+            pos[3*i+4::3] = pos[3*i+1]
+            pos[3*i+5::3] = pos[3*i+2]
+            for j in range(len(magn)-1-i):
+                magn[i+1+j] = magn[i]* rel_fac**j # relaxate by simple multiplication
+            break                                 # break out of stepping loop and exit
+    return last_step                # normal exit
+
+def upd_avg_var(mk,vk,k,newx,samcov=True):
+    """Update the sample-average mk and variance vk with new value newx.
+    The sample consists of k   values before updating,
+    the sample consists of k+1 values after  updating.
+
+    Input:
+    mk, vk, k       sample average, variance, number of samples
+    newx            new sample datum
+
+    samcov == True  Update using the corrected sample-variance.
+                    Otherwise using the standard deviation.
+                    
+    Return:
+    mk, vk, k       same as input, but now k = k+1"""
+    #check for valid lengths
+    if ( bool(type(mk) != int) != bool(type(mk) != float) != bool(type(mk) != complex)): # this is an xor!
+        if ( len(mk) != len(vk) ):
+            raise RWError(3,"when updating, mk/vk lengths do not match!")
+        if ( len(mk) != len(newx) ):
+            raise RWError(3,"when updating, mk/newx lengths do not match!")
+    # convert to np.arrays for addition and exponentiation, k to float
+    mk   = np.array(mk)
+    vk   = np.array(vk)
+    newx = np.array(newx)
+    k    = float(k)
+    # update variance
+    if samcov == True:
+        vk   = (k-1)*vk/k + (newx - mk)**2/(k+1)
+        #print 'max difference',max((newx-mk)**2)
+    else :
+        vk   = (k*vk + k*(newx - mk)**2/(k+1))/(k+1)
+    # update average
+    mk   = (k*mk+newx)/(k+1)
+    # return new mean, variance, and sample size for next update
+    return mk,vk,k+1
+
+def rand_sphe():
+    """generate random position on unit 3D sphere around origin"""
+    while True :
+        x,y,z = rnd.random()*2-1,rnd.random()*2-1,rnd.random()*2-1
+        if x**2+y**2+z**2 < 1 :
+            break
+    return np.array([x,y,z])/math.sqrt(x**2+y**2+z**2)
+
+def rand_start(startb):
+    """generate random position within starting box"""
+    return np.array( [(rnd.random()*2-1)*startb,(rnd.random()*2-1)*startb,(rnd.random()*2-1)*startb] )
+
+def gen_rel_cen(density, cen_box, dist="uniform"):
+    """function to generate relaxation centers in the centers box around the origin"""
+    # numbers of centers in center box
+    num_cen = int(density*cen_box**3)
+    rel_cen = []
+    for i in range(num_cen):    # append x,y,z coordinates, each within cen_box
+        rel_cen.append((rnd.random()*2-1)*cen_box)
+        rel_cen.append((rnd.random()*2-1)*cen_box)
+        rel_cen.append((rnd.random()*2-1)*cen_box)
+    print "generated center distribution. number of centers:",num_cen
+    return np.array(rel_cen)
+
+def plot_rel_cen(centers,const,fraction=1.,axes=None,fname=None):
+    """plot a 2D projection of rel. rate
+    centers     relaxation centers
+    const       size of box with centers
+    fraction    which part to take of the cen box (in percent, almost no effect)
+    fname       supply string if you want to save figure"""
+    rel_cen = centers["positions"]
+    cen_box = const["cen_box"]
+    b_rad   = const["b_rad"]
+    C_const = const["C_const"]
+    dt      = const["dt"]
+    dx = b_rad/1.           # coarse grid for plotting
+    xr = np.arange(-cen_box,+cen_box,dx)       # regular grid for sampling
+    yr = np.arange(-cen_box,+cen_box,dx)
+    xlen = len(xr)
+    print "number of grid points for plotting centers:",xlen**2
+    # make grid (xr and yr now of 2d with squared as many elements, giving x,y coordinates respectively)
+    xr,yr = np.meshgrid(xr,yr)
+    xr = xr.flatten()      # flatten for loop
+    yr = yr.flatten()
+    rr = np.empty(xr.shape,dtype=xr.dtype)
+    progress = Progress(len(xr))
+    for p in range(len(xr)):
+        rel = accum_rate_C(rel_cen,np.array([b_rad]),np.array([xr[p],yr[p],0]))
+        if rel == -1: #accum_rate returns -1, if inside radius: set to value on border
+            rel = b_rad**-6
+        rr[p] = rel
+        progress.increment()
+        progress.print_status_line()
+    rr = 1.-(dt*C_const*rr)           # apply relaxation rate
+    #print max(rr),min(rr)        # for debugging use
+    rr = rr.clip(0,1)             # clamp the array (not really necessary...)
+    # reshape to 2d for plotting
+    rr = rr.reshape((xlen,xlen))
+    yr = yr.reshape((xlen,xlen))
+    xr = xr.reshape((xlen,xlen))
+    # prepare plot
+    if axes==None :
+        fig=plt.figure()
+        axes=fig.add_subplot(111)
+    levels = np.linspace(1.-dt*C_const*b_rad**-6,1,num=7) # levels for the contour plot
+    levels = np.linspace(min(rr.flatten()),1,num=7) # levels for the contour plot
+    cen_plot = axes.contourf(xr,yr,rr, levels, rstride=1, cstride=1)
+    bar = plt.colorbar(cen_plot)      # colorbar at right side of plot
+    bar.formatter = tick.FormatStrFormatter('%6f')
+    bar.update_ticks()
+    axes.set_title("Relaxation factor $f_R$ in $z=0$ plane ($m^{n+1}=f_R m^n$)\n\n")
+    axes.set_xlabel("$x$")
+    axes.set_ylabel("$y$")
+    axes.set_aspect('equal', adjustable='box') # make x/y axes of same aspect and adjust whole box to fit the plit (no white spaces)
+    if type(fname) is str :
+        plt.savefig(fname)
+    return cen_plot
+
+def plot_magn(magn,magnerr,time_array,axes=None,actwalk=None,plotpoints=10000,label="",**kwargs):
+    """plot the magnetization and its error over the time array.
+
+        magn        magnetization array
+        magnerr     error of magnetization
+        time_array  same dimentsion of magn/magnerr
+        axes        can provide a plot axis
+        actwalk     can provide array of percentage of active walkers at certain times
+        plotpoints  sample points in the plot (many makes plot handling slow)
+        label       can provide a label for plot
+        kwargs      optional arguments for plot
+
+        returns
+        list of plotted lines """
+
+    # thin out arrays
+    magn    = magn[::math.ceil(len(magn)/plotpoints)]
+    magnerr = magnerr[::math.ceil(len(magnerr)/plotpoints)]
+    time_array = time_array[::math.ceil(len(time_array)/plotpoints)]
+    if len(magn) != len(magnerr) or len(magn) != len(time_array) :
+        raise RWError(20,"PLOT: shape mismatch after thinning: len(magn)="+str(len(magn))+" len(err)="+str(len(magnerr))+" len(time)="+str(len(time_array)))
+    if actwalk != None :
+        actwalk = actwalk[::math.ceil(len(actwalk)/plotpoints)]
+        if len(actwalk) != len(time_array):
+            raise RWError(20,"PLOT: shape mismatch after thinning: len(actwalk)="+str(len(actwalk))+" len(time)="+str(len(time_array)))
+
+    if axes == None :
+        fig = plt.figure()
+        axes = fig.add_subplot(111)
+    # make color of error same color as mag
+    color = None
+    if "color" in kwargs:
+        color = kwargs.pop("color")
+    if color != None :
+        plmag    = axes.plot(time_array,magn,color=color,linestyle='-',label=label,**kwargs)
+    else :
+        plmag    = axes.plot(time_array,magn,linestyle='-',label=label,**kwargs)
+    color = plmag[0].get_color()
+
+    plmagperr = axes.plot(time_array,magn+magnerr,color=color,linestyle='--',**kwargs)
+    plmagmerr = axes.plot(time_array,magn-magnerr,color=color,linestyle='--',**kwargs)
+    if actwalk != None :
+        plactwalk = axes.plot(time_array,actwalk,color=color,linestyle='-',**kwargs)
+    # plot options
+    axes.set_xlabel("$t/$s")
+    axes.set_ylabel("$m(t)/m_0$")
+    axes.set_ylim(-0.1,1.1)
+    axes.set_xlim(0,time_array[-1])
+    axes.set_title('Relaxation over time')
+    axes.legend(loc=0)
+    if actwalk != None :
+        return plmag,plmagperr,plmagmerr, plactwalk
+    else :
+        return plmag,plmagperr,plmagmerr
+
+
+
+accum_code = """
+double accum_rate_C (int lencen, double* rel_cen, int blen, double* brad, int dim, double* pos ){
+    double rel = 0;
+    for (int i=0; i<lencen/3; i++) {
+        //accumulate rate by adding 1/r^6
+        double distsq = pow(pos[0]-rel_cen[3*i],2) + pow(pos[1]-rel_cen[3*i+1],2) + pow(pos[2]-rel_cen[3*i+2],2);
+        if (distsq < brad[0]*brad[0]) {
+            return -1;   // turn stepping off
+            }
+        rel += pow(distsq,-3);
+        }
+    return rel;
+}
+"""
+
+# this compiles the code into a built-in function when importing the module
+accum_rate_C = inline_with_numpy(accum_code, arrays = [['lencen', 'rel_cen'],['blen','brad'],['dim','pos']])
+
+def accum_rate_P( rel_cen, brad, pos,exit = True):
+    """accumulate relaxation (sum r**-6)
+    rel_cen         flattened array of x,y,z positions of relax centers
+    brad            array (!) of brad (only one element)
+    pos             x,y,z positions of walker
+    exit = True     if True, returns -1 when inside brad
+                    if False, returns sum r**-6
+
+    The C version of the same function (exit=True fixed!) is called accum_rate_C and accepts the same arguments."""
+    rel = 0
+    for i in range(len(rel_cen)/3):
+        distsq = (pos[0]-rel_cen[3*i])**2+(pos[1]-rel_cen[3*i+1])**2+(pos[2]-rel_cen[3*i+2])**2
+        if distsq < brad[0]**2 and exit :
+            return -1
+        rel += distsq**-3
+    return rel
+
+def save_pkl(save_obj,directory="./dumpdir/"):
+    """save an object to a file using pickle. The file will be named messdumpn, where n is an integer number.
+    input:
+        save_obj    the object to be saved
+        directory   the target directory
+    return:
+         0  if all is well
+        -1  if error"""
+    import os, errno
+    # test if directory can be created
+    try :
+        os.makedirs(directory)
+        print "creating dump directory",directory
+    except OSError as err:
+        if err.errno != errno.EEXIST:
+            raise
+        print "existing dump directory",directory
+
+    fh = None
+    running = 1
+    # create files with running label, but not more than 999
+    #  this assures consistent labels (leading zeros)
+    while running < 1000 : 
+        if not os.path.exists(directory + "messdump%03d" % running ):
+            fh = open(directory + "messdump%03d" % running, 'wb')
+            print "will safe in " + directory +"messdump%03d" % running
+            break
+        else :
+            running = running+1
+    else :
+        print "too many files!"
+
+    # if file was opened successfully, dump and close, return exit code
+    if fh != None :
+        pickle.dump(save_obj,fh)
+        fh.close()
+        return 0
+    else :
+        return -1
+
+def load_pkl(filename):
+    """load a pickled object from path
+    input:
+        filename    the path of the pickle (string, with dirs)
+    return:
+        object  the loaded object
+        None    if error"""
+    import os, errno
+    # test if file exists
+    if not os.path.exists(filename):
+        print "Filename given does not exists!"
+        return None
+    if not os.path.isfile(filename):
+        print "Filename given is not a file!"
+        return None
+    else :
+        # open file and load the pickled object
+        fh = open(filename,"rb")
+        obj = pickle.load(fh)
+        fh.close()
+        cenkey = ""
+        conkey = ""
+        expkey = ""
+        if type(obj) is dict :
+            for key in obj.keys():
+                if key.find('cen') != -1 :
+                    cenkey = key
+                if key.find('con') != -1 :
+                    conkey = key
+                if key.find('exp') != -1 :
+                    expkey = key
+            if cenkey != "" and conkey != "" and expkey != "" :
+                print "returning (const,centers,experiment) as tuple"
+                return obj[conkey], obj[cenkey], obj[expkey]
+            else :
+                print "could not find relevant keys, will return raw object"
+                return obj
+        else :
+            print "pickled object is no dict, so probably not a relaxrw!"
+            return obj
+
+
+def fill_const(const):
+    """Makes additional entries to const dictionary.
+
+    neccessary keys:
+    steps                       number of steps
+    C_const, D_const, b_rad,    spin diffusion constants
+    step_factor,                step len in terms of b_rad
+    start_box, cb_factor        starting point of random walker, ratio boxes cen/start
+    
+    adds keys:
+    cen_box             box of relax centers
+    step_len            lengths of steps in m
+    dt                  duration of step in s
+    total_time          total time of walk
+    MSD                 mean square displacement
+    b0_rad              radius of detection/measurement (not in use at present)
+
+    return:
+     0      if all is well
+    -1      if error
+    """
+    if type(const) is not dict :
+        print "Input is not of type dict"
+        return -1
+
+    if not (const.has_key("steps")       and
+            const.has_key("C_const")     and
+            const.has_key("D_const")     and
+            const.has_key("b_rad")       and
+            const.has_key("step_factor") and
+            const.has_key("start_box")   and
+            const.has_key("cb_factor")   ) :
+        print "Input has not required keys!"
+        return -1
+
+    const['cen_box']    = const["start_box"]*const["cb_factor"]
+    const['step_len']   = const["b_rad"]*const["step_factor"] 
+    const['dt']         = const["step_len"]**2./(6*const["D_const"])  
+    const['total_time'] = const["dt"]*const["steps"]  
+    const['MSD']        = math.sqrt(6*const["D_const"]*const["total_time"]) 
+    # might be used later 
+    const['b0_rad']     = const["b_rad"]*1.6 # valid only for F-Zentr in LiF
+    return 0
+
+def init_exp(exp,const):
+    """initialize experimental quantities.
+
+    input:
+    exp     empty dict
+    const   constants dict
+
+    output:
+     0      if all is well
+    -1      if error
+
+    exp contains arrays for the walks. (see docstring of make_walks)"""
+
+    steps = const["steps"]
+    # first: changeable data
+    #   arrays for walk data
+    exp["magn"]     = np.zeros( steps+1   ,dtype='d')
+    exp["magnvar"]  = np.zeros( steps+1   ,dtype='d')
+    exp["magnerr"]  = np.zeros( steps+1   ,dtype='d')
+    exp["possq"]    = np.zeros((steps+1)*3,dtype='d')
+    exp["possqvar"] = np.zeros((steps+1)*3,dtype='d')
+    exp["possqerr"] = np.zeros((steps+1)*3,dtype='d')
+    exp["actwalk"]  = np.zeros( steps+1   ,dtype='d')
+
+    #   no of walks
+    exp["walks_done"] = 0
+
+    # time array is fixed by steps and dt
+    exp["time_array"] = np.arange(0,const["dt"]*(steps+1/2.),const["dt"])
+
+    return 0
+
+def display_all(con,cen,exp):
+    """plot information about the experiment
+
+    input:      (see docstring of make_rw for info)
+    con:    constants dict  
+    cen:    centers dict
+    exp:    experiment dict
+
+    output:
+     0      if all is well
+    -1      if error
+    """
+
+    # plotting some information
+    try : 
+        print "walks done:         ", exp["walks_done"]
+        print "number of steps:    ", con["steps"]
+        print "C constant:         ", con["C_const"],"m^6/s"
+        print "D constant:         ", con["D_const"],"m^2/s"
+        print "radius b:           ", con["b_rad"],"m"
+        print "length of steps:    ", con["step_len"],"m"
+        print "size of start box:  ", con["start_box"],"m"
+        print "time step       :   ", con["dt"],"s"
+        print "total time:         ", con["total_time"],"s"
+        print "estimated <r^2>^1/2:", con["MSD"],"m"
+        print "density of rel cen: ", cen["density"],"1/m^3"
+        print "avg dist of rel cen:", cen["mean_dist"],"m"
+        print "size of center box: ", con["cen_box"],"m"
+        print "magnetization decay:", exp["magn"][-1]
+    except :
+        return -1
+    return 0
+
+def make_walks(const, centers, exp, walks=0,plotaxes=None):
+    """Make random walks.
+
+    Input:
+    const       constants dict: steps               (numbers of),
+                                C_const, D_const, b_rad,
+                                step_len            (determined by b_rad), 
+                                start_box, cen_box  (boxes of start and centers),
+                                dt                  (time step det. by D_const),
+                                total_time          (total time of walk)
+                                MSD                 (estimated mean square displacement)
+    centers     centers dict:   positions           (flat array of coordinates),
+                                density, mean_dist  (of/between cen)
+    exp         experiment dict:    walks_done  (number of),
+                                    magn, magnvar       (magnetization, its variance),
+                                    magnerr             (its error),
+                                    possq, possqvar    (squared pos,   its variance),
+                                    possqerr           (its error),
+                                    distsq, distsqvar   (squared dist,  its variance),
+                                    distsqerr           (its error),
+                                    time_array          (for plotting)
+                                    actwalk             (active walkers)
+
+    Output:
+     0      if all is well
+    -1      if error
+
+    Makes additional walks and thus renders exp more precisely.
+    Only makes changes to values in exp."""
+
+    # plotting some information
+    print "walks done:         ", exp["walks_done"]
+    print "additional walks:   ", walks
+    print "number of steps:    ", const["steps"]
+    print "C constant:         ", const["C_const"],"m^6/s"
+    print "D constant:         ", const["D_const"],"m^2/s"
+    print "radius b:           ", const["b_rad"],"m"
+    print "length of steps:    ", const["step_len"],"m"
+    print "size of start box:  ", const["start_box"],"m"
+    print "time step       :   ", const["dt"],"s"
+    print "total time:         ", const["total_time"],"s"
+    print "estimated <r^2>^1/2:", const["MSD"],"m"
+    print "density of rel cen: ", centers["density"],"1/m^3"
+    print "avg dist of rel cen:", centers["mean_dist"],"m"
+    print "size of center box: ", const["cen_box"],"m"
+
+    print "starting walks"
+    steps = const["steps"]
+    magntmp = np.zeros( steps+1   ,dtype='d')   # temp magnetization
+    postmp  = np.zeros((steps+1)*3,dtype='d')   # temp (not squared!) position
+    actwalktmp =  np.zeros(steps+1,dtype='d')   # temp active walk          
+    # constants array for relax_rw function (calculating a single walk)
+    consts=np.array([const["C_const"],const["C_const"],const["b_rad"],const["b0_rad"],const["step_len"],const["dt"]])
+
+    #start the walks
+    progress = Progress(walks)
+    for walk in range(walks):
+        # reset first three values of "empty" arrays, the magnetization and active walkers 
+        startpos = rand_start(const["start_box"])
+        postmp[:3]    = startpos
+        magntmp[0]    = 1
+        actwalktmp[:] = 1
+        # new random numbers for next walk
+        #  (the random module makes use of the Mersenne-Twister algorithm)
+        rndnos = np.array([rand_sphe() for i in range(steps)]).flatten()
+        # make random walk (looks crappy due to intended C version)
+        last_step = relax_rw(rndnos, postmp, magntmp, centers["positions"], consts)
+        actwalktmp[last_step+1:] = 0
+        if plotaxes != None :
+            # plot the walk (only x,y dimensions)
+            rwplot = plotaxes.plot(postmp[0::3],postmp[1::3],'k-')
+        # to calculate covered distance, correct the positions
+        postmp[0::3] -= startpos[0]
+        postmp[1::3] -= startpos[1]
+        postmp[2::3] -= startpos[2]
+        # square positions for squared distance
+        postmpsq = postmp**2
+        # update mean, variance, and k, do so for magnetization
+        if exp['walks_done'] == 0:  # if first walk, assign directly
+            exp['walks_done'] = 1
+            exp["possq"] = postmpsq
+            exp["magn"]  = magntmp
+            exp["actwalk"] = actwalktmp
+        else : # from second on, update
+            exp["actwalk"], devnull, devnull =\
+                    upd_avg_var( exp["actwalk"], np.zeros(steps+1, dtype='d'), exp["walks_done"], actwalktmp )
+            exp["possq"], exp["possqvar"], devnull =\
+                    upd_avg_var( exp["possq"], exp["possqvar"], exp['walks_done'], postmpsq )
+            exp["magn"], exp["magnvar"], exp['walks_done'] =\
+                    upd_avg_var( exp["magn"], exp["magnvar"], exp['walks_done'], magntmp )
+            #print 'walks_done:',exp['walks_done'], "max of magnvar",max(exp['magnvar'])
+        progress.increment()
+        progress.print_status_line()
+
+    print "collecting and transforming data"
+    # update the errors and distances in exp
+    # calculating the magnerr 
+    exp["magnerr"]   = np.sqrt( exp["magnvar"]/exp['walks_done'] )
+    exp["possqerr"]  = np.sqrt( exp["possqvar"]/exp['walks_done'] )
+    #calculating the distance (x^2+y^2+z^2)
+    exp["distsq"]    = np.array([sum(exp["possq"][3*i:3*(i+1)]) for i in range(len(exp["possq"])/3)] )
+    exp["distsqerr"] = np.sqrt(np.array([sum(exp["possqvar"][3*i:3*(i+1)]**2) for i in range(len(exp["possq"])/3)])/exp['walks_done'])
+    # printing some information
+    print "root mean square displ.: (",exp["distsq"][-1]**.5,"pm",exp["distsqerr"][-1]**.5,") m"
+
+    return 0
+
+
+
+
+

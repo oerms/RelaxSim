@@ -1,0 +1,76 @@
+# simple test of relaxsim.py module with classes
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib import rc
+rc('text', usetex=True)
+rc('text.latex',preamble='\usepackage[charter]{mathdesign}\n\usepackage{phystex_base}')
+rc('font',**{'family':'serif','serif':['Charter'], 'size':16})
+rc('mathtext', **{'it':'Charter', 'fontset':'custom'})
+
+import relaxsim
+from relaxsim import *
+reload(relaxsim)
+from relaxsim import *
+
+size = 2e-8     
+C = 1e-54
+D = 1e-16       # 
+a = 2.847e-10   # lattice constant
+mean_dist = 3e-9
+density = 1/(mean_dist**3*np.pi*4/3.)
+evo_time = 1e1
+
+lowtau = 1e-7
+hightau = 1e-4
+
+lowfield  = 2
+highfield = 3
+fields = 1
+
+plotpoints = 100
+
+
+##########################################
+taurange = relaxsim._log_range(lowtau,hightau,num=plotpoints)
+
+import matplotlib.pyplot as plt
+
+fig = plt.figure()
+ax = fig.add_subplot(111)
+ax.set_xscale('log')
+#ax.set_yscale('log')
+ax.set_ylabel("")
+ax.set_ylim(bottom=-0.1,top=1.2)
+ax.set_xlabel("$\\tau$/s")
+
+#plotting b constants
+binfty = bradius(1.22,1e23)
+ax.plot(taurange,np.ones(taurange.shape),'k-.')
+ax.plot(taurange,np.zeros(taurange.shape),'k-.')
+ax.plot(taurange,np.ones(taurange.shape)/binfty*a,label="$a/b_\\infty$")
+
+bfield = 1      # brad is same for all (0.5T < B0 < 20T ) fields over whole taurange
+brange = bradius(bfield,taurange)
+bmin = brange.min()
+ax.plot(taurange,brange/binfty,label="$b/b_\\infty$")
+
+Cmax = Cconst(lowfield,taurange.min())
+
+Rmax = Cmax/bmin**6
+
+# plotting b,C
+for bfield in relaxsim._log_range(lowfield,highfield,num=fields): 
+    Crange = Cconst(bfield,taurange)
+    Cmin = Cconst(bfield,hightau)
+    print Crange[0]/Cmin
+    cplt = ax.plot(taurange,Crange/Cmin/1e4,'--',label="$C\cdot 10^{-4}/C_{min}$ at $B_0="+"\\SI{"+"{:.0f}".format(bfield)+"}{\\tesla}$")
+    color = cplt[0].get_color() 
+    
+    Rrange = Crange/brange**6
+    Rmin = Cmin/binfty**6
+    print Rrange[0]/Rmin
+    ax.plot(taurange,Rrange/Rmin/1e5,label="$R\cdot 10^{-5}/R_{min}$ at $B_0="+"\\SI{"+"{:.0f}".format(bfield)+"}{\\tesla}$",color=color)
+
+ax.legend(loc=0)
+fig.savefig("bradrelax.pdf")
+
