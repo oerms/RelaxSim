@@ -421,7 +421,7 @@ class RelaxCenters():
         print "Number of centers:",self.center_number
         
         if centers != None:
-            #TODO cleanup with number of centers and such...
+            #TODO cleanup with names and number of centers and such...
             if self.distribution == "homogeneous" or self.distribution == 'hom':
                 self.name = self.name + "hom" + "cen"
                 self.center_positions = self.size*rnd.rand(self.center_number,3)
@@ -440,7 +440,6 @@ class RelaxCenters():
             if type(centers)==type(np.array(1)):
                 fold_back_C(centers,np.array([self.size]))
                 self.center_positions = centers*self.size
-                self.name = name+"customcen"
             else:
                 raise RelaxError(2,"centers in RelaxCenters._init_() is not a numpy array!")
             
