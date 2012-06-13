@@ -97,7 +97,7 @@ def BSdash(x,S):
     return -((2*S+1)/(2*S))**2 * csch((2*S+1)/(2*S)*x)**2 + 1/(4*S*S) * csch(x/(2*S))**2
 
 def avmup(bfield,tau,temperature=300,nucleus="F",T2n=''):
-    """calculate average mu of impurity according to rorschach"""
+    """calculate average mu of impurity according to rorschach1964"""
     mue = 9.285e-24         # electronic magnetic moment in J/T
     kB  = 1.381e-23         # Boltzmann constant in J/K
     xforBS  = mue * bfield/(kB*temperature)
@@ -107,13 +107,13 @@ def avmup(bfield,tau,temperature=300,nucleus="F",T2n=''):
         munuc   = 1.327e-26     # magnetic moment of fluorine
         T2nuc   = 53.5e-6       # T2 time of fluorine in LiF (stork2010)
     elif nucleus == "Li":
-        print "TODO"
+        print "TODO" 
         # TODO
     else:
         raise ValueError("No other element than fluorine implemented.")
     if T2n != '':
         T2nuc = T2n
-    parenth = BS(xforBS,S)**2 + BSdash(xforBS,S)*2/np.pi * np.arctan(2*np.pi*tau/T2nuc)
+    parenth = BS(xforBS,S)**2 + BSdash(xforBS,S)*2/np.pi * np.arctan(2*np.pi*tau/T2nuc)  #2.29  master thesis
     return mue*np.sqrt(parenth)
 
 def bradius(avmup,nucleus="F",lattconst=2.848e-10):
@@ -130,7 +130,7 @@ def bradius(avmup,nucleus="F",lattconst=2.848e-10):
 def gettau(density,bfield):
     """return estimated tau by density and B0
     input:
-        density in m^-3
+        density in m^-3  (6.4 master thesis)
         bfield  in T
         """
     return 5e-4*(density/1.4e24)**-0.68 * (bfield/1.5)*0.94
@@ -229,7 +229,7 @@ pos     current position
 works with real positions as well as with coordinates j,l,m"""
 accum_code = """
 double accum_dist_C (int lencen, double* centers, int constlen, double* consts, int dim, double* pos ){
-    double rel = 0;
+    double ret = 0;
     double dx; double dy; double dz;
     double distsq;
     for (int i=0; i<lencen/3; i++) {
@@ -248,9 +248,9 @@ double accum_dist_C (int lencen, double* centers, int constlen, double* consts, 
             consts[4] = centers[3*i+2];
             return -1;   // turn stepping off
             }
-        rel += pow(distsq,-3);
+        ret += pow(distsq,-3);
         }
-    return rel;
+    return ret;
 }
 """
 # this compiles the code into a built-in function when importing the module, need "local_headers.h" file
@@ -261,33 +261,29 @@ accum_dist_C = inline_with_numpy(accum_code, arrays = [['lencen', 'centers'],['c
 import os
 os.remove("local_headers.h")
 
-def accum_dist_P(centers, const, pos,exit = True):
+def accum_dist_P(centers, const, pos, exit = True):
     """accumulate relaxation (sum r**-6)
-    centers         flattened array of x,y,z positions of relax centers
-    const           array (!) of brad and size
-    pos             array of x,y,z positions of walker and x,y,x or catching center
+    centers         flattened array of x,y,z-positions of relax centers
+    const           array (!) of brad, size, x,y,z-position of last center
+    pos             array of x,y,z positions of walker
     exit = True     if True, returns -1 when inside brad
                     if False, returns sum r**-6
 
     The C version of the same function (exit=True fixed!) is called accum_dist_C and accepts the same arguments."""
-    rel = 0
+    ret = 0
     for i in range(len(centers)/3):
         #print pos[0],centers[3*i],const[1]
-        dx = (min( abs(pos[0]-centers[3*i  ]), const[1]-abs(pos[0]-centers[3*i  ])))**2
-        dy = (min( abs(pos[1]-centers[3*i+1]), const[1]-abs(pos[1]-centers[3*i+1])))**2
-        dz = (min( abs(pos[2]-centers[3*i+2]), const[1]-abs(pos[2]-centers[3*i+2])))**2
-        #distsq = \
-    #(min( abs(pos[0]-centers[3*i  ]), const[1]-abs(pos[0]-centers[3*i  ])))**2\
-   #+(min( abs(pos[1]-centers[3*i+1]), const[1]-abs(pos[1]-centers[3*i+1])))**2\
-   #+(min( abs(pos[2]-centers[3*i+2]), const[1]-abs(pos[2]-centers[3*i+2])))**2
+        dxsq = (min( abs(pos[0]-centers[3*i  ]), const[1]-abs(pos[0]-centers[3*i  ])))**2
+        dysq = (min( abs(pos[1]-centers[3*i+1]), const[1]-abs(pos[1]-centers[3*i+1])))**2
+        dzsq = (min( abs(pos[2]-centers[3*i+2]), const[1]-abs(pos[2]-centers[3*i+2])))**2
         #print dx,dy,dz
-        distsq = dx+dy+dz
+        distsq = dxsq+dysq+dzsq
         #print distsq
         if distsq < const[0]**2 and exit :
             const[2:5] = centers[3*i:3*i+3]
             return -1
-        rel += distsq**-3
-    return rel
+        ret += distsq**-3
+    return ret
 
 """
 fold_back_C folds back any coordinates that are outside [0,size] in place
@@ -308,9 +304,11 @@ void fold_back_C (int lencoo, double* coords, int constlen, double* consts){
 fold_back_C = inline_with_numpy(fold_code, arrays = [['lencoo', 'coords'],['constlen','consts']])
 
 
-fold_code="""
-}
-"""
+
+
+
+
+
 def fold_back_P(coords, consts):
     """
     fold back any coordinates that are outside [0,size] conforming to periodic boundaries
@@ -348,7 +346,7 @@ def intersec_sphere(r1,r2,rc,b,step,offset_factor=0.01):
         #print "WARNING: problem in intersec_sphere(), jump too long!"
     #print "USED INTERSEC"
     intersec = r1+lam*(r2-r1)
-    ## beachte: numerische ungenauigkeiten koennen dazu fuehren, dass alter punkt und neuer punkt rechnerisch innerhalb
+    ## beachte: numerische ungenauigkeiten koennen dazu fuehren, dass alter punkt und neuer punkt rechnerisch innerhalb brad
     ## deswegen setze schnittpunkt etwas ausserhalb des quenching radius 
     # return a point which is slightly outside the sphere around rc (distance = offset_factor*b)
     return intersec*(1+offset_factor) - rc*offset_factor
@@ -420,7 +418,7 @@ class RelaxCenters():
         self.center_number = int(density*size**3)
         print "Number of centers:",self.center_number
         
-        if centers != None:
+        if centers == None:
             #TODO cleanup with names and number of centers and such...
             if self.distribution == "homogeneous" or self.distribution == 'hom':
                 self.name = self.name + "hom" + "cen"
@@ -438,8 +436,9 @@ class RelaxCenters():
                 print "Distribution not supported yet, generating homogeneous distribution."
         else:
             if type(centers)==type(np.array(1)):
-                fold_back_C(centers,np.array([self.size]))
+                fold_back_C(centers,np.array([1.]))
                 self.center_positions = centers*self.size
+                self.distribution = "custom"
             else:
                 raise RelaxError(2,"centers in RelaxCenters._init_() is not a numpy array!")
             
@@ -587,7 +586,7 @@ class RelaxResult():
         """write data to internal variables, interpolating to less points, fitting to exponential decay
         
         input:
-            experiment      an experiment instance
+            experiment      an RelaxExperiment instance
                        
         optional input:
             overwrite       bool if existing data in RelaxResult instance should be overwritten
@@ -1145,7 +1144,7 @@ class RelaxExperiment():
         print "number of walkers:  ", walks
         
         def random_spherical_coord():
-            """generate random position on unit 3D sphere around origin"""
+            """generate one random position on unit 3D sphere around origin"""
             while True :
                 step = rnd.uniform(-1,1,3)
                 #norm = np.linalg.norm(step)
@@ -1156,7 +1155,7 @@ class RelaxExperiment():
             return step/np.sqrt(norm)
         
         def gen_steps(steps_number):
-            """generate random position on unit 3D sphere around origin"""
+            """generate random positions on unit 3D sphere around origin"""
             z = rnd.uniform(-1,+1,steps_number)
             theta = rnd.uniform(0,2*math.pi,steps_number)
             rad = np.sqrt(1-z**2)
