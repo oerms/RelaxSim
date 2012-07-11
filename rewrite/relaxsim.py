@@ -877,7 +877,7 @@ class RelaxResult():
 class RelaxExperiment():
     """A class for the actual "Experiment" on a center distribution.
     Instances are meant to be transient and not saved/duplicated."""
-    def __init__(self, centers, evolution_time, dxb_ratio=1/4., method="randomwalks",**kwargs):
+    def __init__(self, centers, evolution_time, dxb_ratio=1/4., method="randomwalks",fake=False,**kwargs):
         """constructor
         
         input:
@@ -898,6 +898,13 @@ class RelaxExperiment():
             raise RelaxError(1,"center input in RelaxExperiment instance is not of class RelaxCenters!")
         else:
             self.centers        = centers
+        # check fake
+        if type(fake) is not bool:
+            print "WARNING in RelaxExperiment(): `fake` is not a boolean: set to fake = False."
+            self.fake = False
+        else:
+            self.fake = fake
+        
         #copy data from centers
         self.name       = centers.name[:-3] + "exp"
         self.size       = self.centers.size
@@ -1010,47 +1017,59 @@ class RelaxExperiment():
         self.M_vector = np.ones(self.lattice_points**3)
         self.Meqzero = 0   # counter of zero entries of M
         
-        # fill D,C,B vectors
-        array_for_rate = np.array([self.b_l,self.lattice_points,0,0,0],dtype="d") # saving time making the array before loop
-        progress = Progress(self.lattice_points)
-        for j in range(self.lattice_points):
-            for l in range(self.lattice_points):
-                for m in range(self.lattice_points):
-                    ind_jlm = ti(j,l,m) # current index, no need to calculate every time
-                    self.C_vector[ind_jlm] = accum_dist_C(self.centers_l,array_for_rate,np.array([j,l,m],dtype="d"))
-                    if self.C_vector[ind_jlm] == -1 :
-                        # if inside any quenching radius, set C_vec to value on border, diffusion to zero
-                        self.C_vector[ind_jlm] = self.b_l**-6
-                        self.D_vector[ind_jlm] = 0
-                        self.M_vector[ind_jlm] = 0
-                        self.Meqzero += 1
-            progress.increment()
-            progress.print_status_line()
-        # amend vectors by constants
-        self.D_vector *= self.D*self.dt*self.dx**-2
-        self.C_vector *= self.C*self.dt*self.dx**-6
+        if self.fake:
+            self.C_vector[:] = 0
+            self.D_vector[:] = 1
+            self.M_vector[:] = 1
+            self.Meqzero = self.lattice_points**3
+        else:
+            # fill D,C,B vectors
+            array_for_rate = np.array([self.b_l,self.lattice_points,0,0,0],dtype="d") # saving time making the array before loop
+            progress = Progress(self.lattice_points)
+            for j in range(self.lattice_points):
+                for l in range(self.lattice_points):
+                    for m in range(self.lattice_points):
+                        ind_jlm = ti(j,l,m) # current index, no need to calculate every time
+                        self.C_vector[ind_jlm] = accum_dist_C(self.centers_l,array_for_rate,np.array([j,l,m],dtype="d"))
+                        if self.C_vector[ind_jlm] == -1 :
+                            # if inside any quenching radius, set C_vector to value on border, diffusion to zero
+                            self.C_vector[ind_jlm] = self.b_l**-6
+                            self.D_vector[ind_jlm] = 0
+                            self.M_vector[ind_jlm] = 0
+                            self.Meqzero += 1
+                progress.increment()
+                progress.print_status_line()
+            # amend vectors by constants
+            self.D_vector *= self.D*self.dt*self.dx**-2
+            self.C_vector *= self.C*self.dt*self.dx**-6
 
         # RHS matrix B, according to p 15, eq (IX)
         print "Creating matrix B."
         import scipy.sparse as spsp
         from scipy.sparse import linalg
-        self.B_matrix = spsp.lil_matrix((self.lattice_points**3, self.lattice_points**3))
-        progress = Progress(self.lattice_points)
-        for j in range(self.lattice_points):
-            for l in range(self.lattice_points):
-                for m in range(self.lattice_points):  # prefactors are already in D_vec/C_vec
-                    ind_jlm = ti(j,l,m)               # these two lines should speed up
-                    D_vec_entry = self.D_vector[ind_jlm] #  the process significantly
-                    self.B_matrix[ind_jlm,ind_jlm]   = 1 -6*D_vec_entry - self.C_vector[ind_jlm]
-                    self.B_matrix[ind_jlm,ti(j,l-1,m)] = D_vec_entry
-                    self.B_matrix[ind_jlm,ti(j-1,l,m)] = D_vec_entry
-                    self.B_matrix[ind_jlm,ti(j+1,l,m)] = D_vec_entry
-                    self.B_matrix[ind_jlm,ti(j,l+1,m)] = D_vec_entry
-                    self.B_matrix[ind_jlm,ti(j,l,m-1)] = D_vec_entry
-                    self.B_matrix[ind_jlm,ti(j,l,m+1)] = D_vec_entry
+        
+        if self.fake:
+            self.B_matrix = spsp.dia_matrix(\
+                (np.ones(self.lattice_points**3)* 20*dt/self.evolution_time,0),\
+                shape=(self.lattice_points**3,self.lattice_points**3)) # diagonal matrix with decrement on diagonal
+        else:
+            self.B_matrix = spsp.lil_matrix((self.lattice_points**3, self.lattice_points**3))
+            progress = Progress(self.lattice_points)
+            for j in range(self.lattice_points):
+                for l in range(self.lattice_points):
+                    for m in range(self.lattice_points):  # prefactors are already in D_vector/C_vector
+                        ind_jlm = ti(j,l,m)               # these two lines should speed up
+                        D_vec_entry = self.D_vector[ind_jlm] #  the process significantly
+                        self.B_matrix[ind_jlm,ind_jlm]   = 1 -6*D_vec_entry - self.C_vector[ind_jlm]
+                        self.B_matrix[ind_jlm,ti(j,l-1,m)] = D_vec_entry
+                        self.B_matrix[ind_jlm,ti(j-1,l,m)] = D_vec_entry
+                        self.B_matrix[ind_jlm,ti(j+1,l,m)] = D_vec_entry
+                        self.B_matrix[ind_jlm,ti(j,l+1,m)] = D_vec_entry
+                        self.B_matrix[ind_jlm,ti(j,l,m-1)] = D_vec_entry
+                        self.B_matrix[ind_jlm,ti(j,l,m+1)] = D_vec_entry
 
-            progress.increment()
-            progress.print_status_line()
+                progress.increment()
+                progress.print_status_line()
 
         print "converting matrix B to CSR format"
         self.B_matrix = self.B_matrix.tocsr()
@@ -1081,21 +1100,23 @@ class RelaxExperiment():
         self.magn      = np.zeros(self.time_steps+1)
         self.magn[0]   = calc_magn(self.lattice,self.M_vector)
         
-        progress = Progress(self.time_steps/1000)
-        for step in range(self.time_steps):
-            self.lattice = self.B_matrix*self.lattice     # calculate time step
-            self.magn[step+1] = calc_magn(self.lattice,self.M_vector)   # calculate magnetization
-            if step%1000 == 999:
-                if self.magn[step+1] < 1e-4:
-                    self.magn[step+2:self.time_steps+1] = 0
-                    break
-                progress.increment()
-                progress.print_status_line()
+        if self.fake:
+            self.magn = np.exp(-20*self.timearray/self.evolution_time)
+        else:
+            progress = Progress(self.time_steps/1000)
+            for step in range(self.time_steps):
+                self.lattice = self.B_matrix*self.lattice     # calculate time step
+                self.magn[step+1] = calc_magn(self.lattice,self.M_vector)   # calculate magnetization
+                if step%1000 == 999:
+                    if self.magn[step+1] < 1e-4:
+                        self.magn[step+2:self.time_steps+1] = 0
+                        break
+                    progress.increment()
+                    progress.print_status_line()
 
         #apply background relaxation
         if background != 0:
-            perstep = exp(-self.dt*background)
-            self.magn *= perstep**np.arange(self.time_steps+1)
+            self.magn *= exp(-self.dt*background)**np.arange(self.time_steps+1)
 
         print "ran deterministic experiment in {0:.0f}s.".format(t.time() - t_detrun_b)
 
@@ -1171,7 +1192,7 @@ class RelaxExperiment():
         postmp  = np.zeros((self.steps_number+1)*3,dtype='d')   # temp position
         actwalktmp =  np.zeros(self.steps_number+1,dtype='d')   # temp active walker
         
-        if do_step:
+        if fake:
             def relax_rw(position, magnetization, actwalktmp, threshhold=threshhold):
                 """Uniform random walk with relaxating magnetization.
             
@@ -1181,11 +1202,30 @@ class RelaxExperiment():
                     position        position vector             len = 3*(steps+1)
                     magnetization   magnetization               len =    steps+1
                     actwalktmp      active walkers              len =    steps+1
+                    threshhold      threshhold magnetization for stopping walks
                 
                 magnetization   contains the magnetization
                 position        contains the walker's positions
                 actwalktmp      contains the active walkers at step
-                threshhold      threshhold magnetization for stopping walks
+                """
+                position[1:] = position[0]
+                magnetization = np.exp(-20*self.timearray*rnd.uniform(low=0.9,high=1.1)/self.evolution_time)
+                actwalktmp = np.exp(-40*self.timearray/self.evolution_time)
+        elif do_step:
+            def relax_rw(position, magnetization, actwalktmp, threshhold=threshhold):
+                """Uniform random walk with relaxating magnetization.
+            
+                Return first step, where the walker comes to rest
+                
+                Input:
+                    position        position vector             len = 3*(steps+1)
+                    magnetization   magnetization               len =    steps+1
+                    actwalktmp      active walkers              len =    steps+1
+                    threshhold      threshhold magnetization for stopping walks
+                
+                magnetization   contains the magnetization
+                position        contains the walker's positions
+                actwalktmp      contains the active walkers at step
                 """
                 
                 step_array = gen_steps(self.steps_number)*self.dx
@@ -1347,8 +1387,7 @@ class RelaxExperiment():
         
         # apply background relaxation
         if background != 0:
-            perstep = np.exp(-self.dt*background)
-            self.magn *= perstep**np.arange(self.steps_number+1)
+            self.magn *= np.exp(-self.dt*background)**np.arange(self.steps_number+1)
             
         self.magnerr   = np.sqrt( self.magnvar/walks )
         #print 'walks_done:',walkers_number
