@@ -1192,7 +1192,7 @@ class RelaxExperiment():
         postmp  = np.zeros((self.steps_number+1)*3,dtype='d')   # temp position
         actwalktmp =  np.zeros(self.steps_number+1,dtype='d')   # temp active walker
         
-        if self.fake:
+        if self.fake == True:
             self.walkers_number = 10
             def relax_rw(position, magnetization, actwalktmp, threshhold=threshhold):
                 """Uniform random walk with relaxating magnetization.
@@ -1214,10 +1214,10 @@ class RelaxExperiment():
                 actwalktmp[:] = (np.exp(-10*self.timearray/self.evolution_time)-rnd.uniform(low=0,high=0.1,size=(len(magnetization),)))[:]
                 return 0
 
-        elif do_step:
+        elif do_step == True: # 
             def relax_rw(position, magnetization, actwalktmp, threshhold=threshhold):
                 """Uniform random walk with relaxating magnetization.
-            
+                The walker may walk away from the center after being stopped.
                 Return first step, where the walker comes to rest
                 
                 Input:
@@ -1316,6 +1316,7 @@ class RelaxExperiment():
         else:
             def relax_rw(position, magnetization, actwalktmp):
                 """Uniform random walk with relaxating magnetization.
+                The walker cannot walk away from the center.
                 Return last step, where the walker comes to rest
                 
                 Input:
