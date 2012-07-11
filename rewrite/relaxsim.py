@@ -201,9 +201,9 @@ def _upd_avg_var(mk,vk,k,newx,samcov=True):
             #raise RWError(3,"when updating, mk/newx lengths do not match!")
             
     # convert to np.arrays for addition and exponentiation, k to float
-    mk   = np.array(mk)
-    vk   = np.array(vk)
-    newx = np.array(newx)
+    mk   = np.array(mk,dtype='d')
+    vk   = np.array(vk,dtype='d')
+    newx = np.array(newx,dtype='d')
     k    = float(k)
     # update variance
     if samcov == True:
@@ -420,7 +420,7 @@ class RelaxCenters():
         self.center_number = int(density*size**3)
         print "Number of centers:",self.center_number
         
-        if centers != None:
+        if centers == None:
             #TODO cleanup with names and number of centers and such...
             if self.distribution == "homogeneous" or self.distribution == 'hom':
                 self.name = self.name + "hom" + "cen"
@@ -437,7 +437,7 @@ class RelaxCenters():
             else:
                 print "Distribution not supported yet, generating homogeneous distribution."
         else:
-            if type(centers)==type(np.array(1)):
+            if type(centers) is np.ndarray:
                 fold_back_C(centers,np.array([self.size]))
                 self.center_positions = centers*self.size
             else:
@@ -731,7 +731,7 @@ class RelaxResult():
 
         os.chdir(currentpath)
         filename = os.path.join(pname,fname)
-        print "Saving Result in",filename
+        print "Saving Result in `"+filename+"`"
         
         import inspect
         import h5py
@@ -1164,7 +1164,7 @@ class RelaxExperiment():
         self.starttime = time.strftime("%Y/%m/%d %H:%M:%S")
         from numpy.linalg import norm as vnorm
         self.walkers_number = walks
-        print "number of walkers:  ", walks
+        print "number of walkers:  ", self.walkers_number
         
         def random_spherical_coord():
             """generate random position on unit 3D sphere around origin"""
@@ -1192,7 +1192,8 @@ class RelaxExperiment():
         postmp  = np.zeros((self.steps_number+1)*3,dtype='d')   # temp position
         actwalktmp =  np.zeros(self.steps_number+1,dtype='d')   # temp active walker
         
-        if fake:
+        if self.fake:
+            self.walkers_number = 10
             def relax_rw(position, magnetization, actwalktmp, threshhold=threshhold):
                 """Uniform random walk with relaxating magnetization.
             
@@ -1209,8 +1210,10 @@ class RelaxExperiment():
                 actwalktmp      contains the active walkers at step
                 """
                 position[1:] = position[0]
-                magnetization = np.exp(-20*self.timearray*rnd.uniform(low=0.9,high=1.1)/self.evolution_time)
-                actwalktmp = np.exp(-40*self.timearray/self.evolution_time)
+                magnetization[:] = np.exp(-20*self.timearray*rnd.uniform(low=0.9,high=1.1)/self.evolution_time)[:]
+                actwalktmp[:] = (np.exp(-10*self.timearray/self.evolution_time)-rnd.uniform(low=0,high=0.1,size=(len(magnetization),)))[:]
+                return 0
+
         elif do_step:
             def relax_rw(position, magnetization, actwalktmp, threshhold=threshhold):
                 """Uniform random walk with relaxating magnetization.
@@ -1360,8 +1363,8 @@ class RelaxExperiment():
         # end ifelse do_step
                 
         #start the walks
-        progress = Progress(walks)
-        for walk in range(walks):
+        progress = Progress(self.walkers_number)
+        for walk in range(self.walkers_number):
             # reset first three values to empty temp arrays
             magntmp[0]    = 1
             postmp[:3]    = rnd.rand(3)*self.size # random starting position within size
@@ -1374,22 +1377,25 @@ class RelaxExperiment():
                 rwplot = plotaxes.plot(postmp[0::3],postmp[1::3],'k-')
             
             if walk == 0:  # if first walk, assign directly
-                self.magn[:]        = magntmp[:]
-                self.activewalkers  = actwalktmp[:]
-            else : # from second on, update values
+                self.magn[:]           = magntmp[:]
+                self.activewalkers[:]  = actwalktmp[:]
+            else: # from second on, update values
                 self.magn, self.magnvar, devnull =\
                         _upd_avg_var( self.magn, self.magnvar, walk, magntmp )
                 self.activewalkers, devnull, devnull =\
                         _upd_avg_var( self.activewalkers, self.activewalkersvar, walk, actwalktmp )
+            #print self.magn.max(),self.magn.sum(),self.magn
+
             
             progress.increment()
-            progress.print_status_line()
+            #progress.print_status_line()
+
         
         # apply background relaxation
         if background != 0:
             self.magn *= np.exp(-self.dt*background)**np.arange(self.steps_number+1)
             
-        self.magnerr   = np.sqrt( self.magnvar/walks )
+        self.magnerr   = np.sqrt( self.magnvar/self.walkers_number )
         #print 'walks_done:',walkers_number
         #print "max of magnvar",max(self.magnvar)
         
