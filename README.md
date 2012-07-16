@@ -10,10 +10,10 @@ planned additions
 * do not remember every step => save RAM (in fake simulation as well!)
 * continuous quenching
 * omit steps if far from centers (can be part of continuous quenching)
-* clean up variables (is C really a local var of Experiment?)
+* clean up variables (is `C` really a local var of Experiment?)
 * make walk class?!
 * time simulations (save start/stop time in hdf)
-* deterministic method for magnetization of single spins (big rate equation) (-> BPP)
+* deterministic method for magnetization of single spins (big rate equation) (=> BPP)
 
 * * *
 
@@ -23,7 +23,7 @@ changelog
 v5 (not tagged yet):
 additions:
 * implement "fake simulation" for fast execution while debugging:
-fake=True in RelaxExperiment()
+`fake=True` in `RelaxExperiment()`
 
 v4:
 additions:
