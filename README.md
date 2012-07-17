@@ -11,6 +11,7 @@ planned additions
 * continuous quenching
 * omit steps if far from centers (can be part of continuous quenching)
 * clean up variables (is `C` really a local var of Experiment?)
+* clean up error codes in `RelaxError` class
 * make walk class?!
 * time simulations (save start/stop time in hdf)
 * deterministic method for magnetization of single spins (big rate equation) (=> BPP)
@@ -20,10 +21,15 @@ planned additions
 changelog
 ---------
 
-v5 (not tagged yet):
+v5 (no tagged commit yet, working copy):
 additions:
-* implement "fake simulation" for fast execution while debugging:
-`fake=True` in `RelaxExperiment()`
+* implement "fake simulation" for fast execution while debugging: `fake=True` in `RelaxExperiment()`
+* add function `quenched_diffusion()` for continous diffusion quenching with radial dependence
+* new C function for searching nearest centers
+
+
+fixes:
+* `overlapl()` used gauss function instead of lorentzian => fix also plot `continbrad_thesis_overlmsdradii_neu.pdf`
 
 v4:
 additions:

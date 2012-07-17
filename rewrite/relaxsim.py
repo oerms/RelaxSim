@@ -68,7 +68,24 @@ def overlapl(x,sigma,sigma2=None):
         sigmanew = 2*sigma
     else:
         sigmanew = sigma+sigma2
-    return gaussn(x,sigmanew)
+    return lorentzn(x,sigmanew)
+    
+def quenched_diffusion(r,tau,bfield,T2n=53.5e-6,gamma=2.516e8,a=2.847e-10):
+    """Quenchen diffusion constant near paramagnetic center.
+    
+    Input:
+        r       distance
+        tau     correlation time of center
+        bfield  macroscopic B0 field
+    Optional:
+        T2n     nuclear spin-spin-relax time
+        gamma   nuclear gyromagnetic ratio
+        a       fluorine-fluorine distance (lattice constant)
+    """
+    # getting constants
+    avermu = avmup(bfield,tau)
+    deltaomega = gamma*a*3*1e-7*avermu / r**4 # see pages 52&55 in notebook
+    return overlapl(deltaomega,2*np.pi/T2n)
 
 def dens(mean_dist):
     """calculate density from average distance"""
@@ -265,11 +282,12 @@ def accum_dist_P(centers, const, pos,exit = True):
     """accumulate relaxation (sum r**-6)
     centers         flattened array of x,y,z positions of relax centers
     const           array (!) of brad and size
-    pos             array of x,y,z positions of walker and x,y,x or catching center
+    pos             array of x,y,z positions of walker and x,y,z of catching center
     exit = True     if True, returns -1 when inside brad
                     if False, returns sum r**-6
 
-    The C version of the same function (exit=True fixed!) is called accum_dist_C and accepts the same arguments."""
+    The C version of the same function (exit=True fixed!) is called accum_dist_C and accepts the same arguments.
+    """
     rel = 0
     for i in range(len(centers)/3):
         #print pos[0],centers[3*i],const[1]
@@ -307,10 +325,6 @@ void fold_back_C (int lencoo, double* coords, int constlen, double* consts){
 """
 fold_back_C = inline_with_numpy(fold_code, arrays = [['lencoo', 'coords'],['constlen','consts']])
 
-
-fold_code="""
-}
-"""
 def fold_back_P(coords, consts):
     """
     fold back any coordinates that are outside [0,size] conforming to periodic boundaries
@@ -324,6 +338,103 @@ def fold_back_P(coords, consts):
         if (coords[i] <        0 ):
             coords[i] += consts[0]*np.ceil(-coords[i]/consts[0])
     return
+
+### ### ### ### ### ### ### ### ### ### 
+"""
+find_nearest_C finds the nearest two centers (with periodic boundaries)
+
+call:   find_nearest_C(np.array(centers),np.array([size]))
+
+Input:
+    cen     flattened array of center positions 
+    pos     current positions of walker, cen1, cen2
+    con     array of dist1, dist2, size (for periodic boundaries)
+
+Return:
+    -1      for error (too few centers)
+"""
+find_code="""
+double find_nearest_C (int lencen, double* cen, int lenpos, double* pos, int lencon, double* con ){
+    double ret = 0;
+    double dx; double dy; double dz;
+    double dist;
+    //test center number
+    if (lencen/3 < 2 || lenpos/3 < 3 || lencon < 3 ){
+        printf("ERROR in find_nearest_C(): Too few centers, positions or constants!\\n");
+        return -1;
+        }
+    
+    for (int i=0; i<lencen/3; i++) {
+        //keeping periodic boundary conditions in mind, find distance
+        dx = (fabs(pos[0]-cen[3*i  ])) < fabs(con[2]-fabs(pos[0]-cen[3*i  ])) ?\
+             (fabs(pos[0]-cen[3*i  ])) : fabs(con[2]-fabs(pos[0]-cen[3*i  ]));
+        dy = (fabs(pos[1]-cen[3*i+1])) < fabs(con[2]-fabs(pos[1]-cen[3*i+1])) ?\
+             (fabs(pos[1]-cen[3*i+1])) : fabs(con[2]-fabs(pos[1]-cen[3*i+1]));
+        dz = (fabs(pos[2]-cen[3*i+2])) < fabs(con[2]-fabs(pos[2]-cen[3*i+2])) ?\
+             (fabs(pos[2]-cen[3*i+2])) : fabs(con[2]-fabs(pos[2]-cen[3*i+2]));
+        dist = sqrt(dx*dx + dy*dy + dz*dz);
+        if ( i == 0 ){
+            con[0] = dist;
+            pos[3] = cen[0];
+            pos[4] = cen[1];
+            pos[5] = cen[2];
+            }
+        else {
+            if ( dist < con[0] ){
+                con[1] = con[0];    // move first into second
+                pos[6] = pos[3];
+                pos[7] = pos[4];
+                pos[8] = pos[5];
+                con[0] = dist;      // move new center into first
+                pos[3] = cen[3*i  ];
+                pos[4] = cen[3*i+1];
+                pos[5] = cen[3*i+2];
+                }
+            else {
+                if ( i == 1){
+                    con[1] = dist;
+                    pos[6] = cen[3*i  ];
+                    pos[7] = cen[3*i+1];
+                    pos[8] = cen[3*i+2];
+                    }
+                }
+            }
+        }
+    return ret;
+}
+"""
+find_nearest_C = inline_with_numpy(find_code, arrays = [['lencen', 'cen'],['lenpos','pos'],['lencon','con']])
+
+def find_nearest_P(cen, pos, con):
+    """
+    accumulate relaxation (sum r**-6)
+    cen         flattened array of x,y,z positions of relax centers
+    pos         array of x,y,z positions of walker and x,y,z of catching center
+    const       array (!) of brad and size
+    
+    A C version of the same function is called find_nearest_C and accepts the same arguments.
+    """
+    rel = 0
+    for i in range(len(centers)/3):
+        #print pos[0],centers[3*i],const[1]
+        dx = (min( abs(pos[0]-centers[3*i  ]), const[1]-abs(pos[0]-centers[3*i  ])))**2
+        dy = (min( abs(pos[1]-centers[3*i+1]), const[1]-abs(pos[1]-centers[3*i+1])))**2
+        dz = (min( abs(pos[2]-centers[3*i+2]), const[1]-abs(pos[2]-centers[3*i+2])))**2
+        #distsq = \
+    #(min( abs(pos[0]-centers[3*i  ]), const[1]-abs(pos[0]-centers[3*i  ])))**2\
+   #+(min( abs(pos[1]-centers[3*i+1]), const[1]-abs(pos[1]-centers[3*i+1])))**2\
+   #+(min( abs(pos[2]-centers[3*i+2]), const[1]-abs(pos[2]-centers[3*i+2])))**2
+        #print dx,dy,dz
+        distsq = dx+dy+dz
+        #print distsq
+        if distsq < const[0]**2 and exit :
+            const[2:5] = centers[3*i:3*i+3]
+            return -1
+        rel += distsq**-3
+    return rel
+    return
+
+### ### ### ### ### ### ### ### ### ### ### ### ### 
 
 def intersec_sphere(r1,r2,rc,b,step,offset_factor=0.01):
     """return end position, for walker stepping from r1 to r2,
@@ -938,16 +1049,7 @@ class RelaxExperiment():
             redo        boolean of finished experiment should be redone
             **kwargs    passed on to specific initializer:
             
-            deterministic:
-                background      apply background relaxation rate,
-                                 0 for no relaxation,
-                                 ~7e-2 /s as usual rate (4mm sample klempt2003 paper)
-                
-            random walks:
-                walks       number of walks to be done
-                plotaxes    to plot the actual walk, give an axis
-                background  apply background relaxation, 0 for no relaxation,
-                            usual rate: ~7e-2 /s (4mm sample klempt2003 paper)
+        see _run_randomwalks() and _run_deterministic() for further arguments
         """
         if self.finished == True:
             if redo != True:
@@ -1149,7 +1251,7 @@ class RelaxExperiment():
         self.timearray      = np.arange(0, self.dt*(self.steps_number+1/2.), self.dt)
     
     
-    def _run_randomwalks(self,walks=10,plotaxes=None,background = 0,threshhold=1e-4,do_step=True):
+    def _run_randomwalks(self,walks=10,plotaxes=None,background = 0,threshhold=1e-4,walk_type="stay"):
         """Run random walks.
         
         optional arguments
@@ -1159,12 +1261,20 @@ class RelaxExperiment():
                              0 for no relaxation,
                              ~7e-2 /s as usual rate (4mm sample klempt2003 paper)
             threshhold      threshhold magnetization for stopping walks
-            do_step         if True, walk away from center again, if False, stay at first contact with quenching radius
+            walk_type       step: walk away from center again, after hitting hard quenching radius
+                            stay: stay at first contact with hard quenching radius
+                            continuous: quenching with continuous step length
         """
         self.starttime = time.strftime("%Y/%m/%d %H:%M:%S")
         from numpy.linalg import norm as vnorm
         self.walkers_number = walks
         print "number of walkers:  ", self.walkers_number
+        
+        # verify walk_type
+        if walk_type != "stay" and walk_type != "step" and walk_type != "continuous": 
+            raise RelaxError(20, "RelaxExperiment._run_randomwalks(): walk_type must be either 'step', 'stay', or 'continuous'!")
+        else:
+            self.walk_type = walk_type
         
         def random_spherical_coord():
             """generate random position on unit 3D sphere around origin"""
@@ -1214,7 +1324,7 @@ class RelaxExperiment():
                 actwalktmp[:] = (np.exp(-10*self.timearray/self.evolution_time)-rnd.uniform(low=0,high=0.1,size=(len(magnetization),)))[:]
                 return 0
 
-        elif do_step == True: # 
+        elif walk_type == 'step': # 
             def relax_rw(position, magnetization, actwalktmp, threshhold=threshhold):
                 """Uniform random walk with relaxating magnetization.
                 The walker may walk away from the center after being stopped.
@@ -1313,7 +1423,7 @@ class RelaxExperiment():
                 if returnstep == -1:
                     returnstep = step
                 return returnstep
-        else:
+        elif walk_type == "stay":
             def relax_rw(position, magnetization, actwalktmp):
                 """Uniform random walk with relaxating magnetization.
                 The walker cannot walk away from the center.
@@ -1361,7 +1471,57 @@ class RelaxExperiment():
                             position[step3+5] += self.size
                 actwalktmp[step+1:] = 0
                 return step       # returns last step
-        # end ifelse do_step
+        elif walk_type == "continuous":
+            def relax_rw(position, magnetization, actwalktmp):
+                """Uniform random walk with relaxating magnetization.
+                The walker cannot walk away from the center.
+                Return last step, where the walker comes to rest
+                
+                Input:
+                    position        position vector             len = 3*(steps+1)
+                    magnetization   magnetization               len = steps+1
+                    actwalktmp      active walkers              len =    steps+1
+                
+                magnetization   contains the magnetization
+                position        contains the walker's positions"""
+                
+                array_for_rate = np.array([self.b,self.size],dtype="d")
+                centers = self.center_positions.flatten()
+                # start the steps
+                for step in range(self.steps_number):
+                    # accumulate distance**-6
+                    dist6 = accum_dist_C(centers, array_for_rate, position[step:step+3])
+                    if dist6 == -1 :
+                        dist6 = 1.-self.dt*self.C*self.b**-6            # calculate relaxation rate
+                        position[3*step+3::3] = position[3*step  ]      # do not step anymore
+                        position[3*step+4::3] = position[3*step+1]
+                        position[3*step+5::3] = position[3*step+2]
+                        magnetization[step+1:] = magnetization[step]* dist6**np.arange(self.steps_number-step)     # relaxate by simple multiplication        
+                        break                                           # break out of stepping loop
+                    else:
+                        dist6 = 1.-self.dt*self.C*dist6                 # calculate relaxation rate
+                        magnetization[step+1] = magnetization[step]*dist6      # apply relaxation rate (clamp included)
+                        step3 = step*3
+                        step_coords = random_spherical_coord()*self.dx
+                        position[step3+3:step3+6] = position[step3:step3+3]+step_coords # make the step
+                        #correct for periodic boundaries
+                        if position[step3+3]>self.size:
+                            position[step3+3] -= self.size
+                        if position[step3+3]<0:
+                            position[step3+3] += self.size
+                        if position[step3+4]>self.size:
+                            position[step3+4] -= self.size
+                        if position[step3+4]<0:
+                            position[step3+4] += self.size
+                        if position[step3+5]>self.size:
+                            position[step3+5] -= self.size
+                        if position[step3+5]<0:
+                            position[step3+5] += self.size
+                actwalktmp[step+1:] = 0
+                return step       # returns last step
+        else:
+            raise RelaxError(21,"Something bad has happened in RelaxExperiment._run_randomwalks(): unknown walk type or fake simulation.")
+        # end ifelse walk_type/fake
                 
         #start the walks
         progress = Progress(self.walkers_number)
