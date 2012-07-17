@@ -359,8 +359,8 @@ double find_nearest_C (int lencen, double* cen, int lenpos, double* pos, int len
     double dx; double dy; double dz;
     double dist;
     //test center number
-    if (lencen/3 < 2 || lenpos/3 < 3 || lencon < 3 ){
-        printf("ERROR in find_nearest_C(): Too few centers, positions or constants!\\n");
+    if ( (lencen/3 < 2) || (lencen%3 != 0) || (lenpos/3 < 3) || (lencon < 3) ){
+        printf("ERROR in find_nearest_C(): Too few centers, not 3*x coordinates, positions or constants!\\n");
         return -1;
         }
     
@@ -373,32 +373,34 @@ double find_nearest_C (int lencen, double* cen, int lenpos, double* pos, int len
         dz = (fabs(pos[2]-cen[3*i+2])) < fabs(con[2]-fabs(pos[2]-cen[3*i+2])) ?\
              (fabs(pos[2]-cen[3*i+2])) : fabs(con[2]-fabs(pos[2]-cen[3*i+2]));
         dist = sqrt(dx*dx + dy*dy + dz*dz);
-        if ( i == 0 ){
+        if ( i == 0 ){      // set both on first loop
             con[0] = dist;
             pos[3] = cen[0];
             pos[4] = cen[1];
             pos[5] = cen[2];
+            con[1] = dist;  
+            pos[6] = cen[0];
+            pos[7] = cen[1];
+            pos[8] = cen[2];
             }
-        else {
-            if ( dist < con[0] ){
-                con[1] = con[0];    // move first into second
-                pos[6] = pos[3];
-                pos[7] = pos[4];
-                pos[8] = pos[5];
-                con[0] = dist;      // move new center into first
-                pos[3] = cen[3*i  ];
-                pos[4] = cen[3*i+1];
-                pos[5] = cen[3*i+2];
-                }
-            else {
-                if ( i == 1){
-                    con[1] = dist;
-                    pos[6] = cen[3*i  ];
-                    pos[7] = cen[3*i+1];
-                    pos[8] = cen[3*i+2];
-                    }
-                }
+        else if ( dist < con[0] ){
+            con[1] = con[0];    // move first into second
+            pos[6] = pos[3];
+            pos[7] = pos[4];
+            pos[8] = pos[5];
+            con[0] = dist;      // move new into first
+            pos[3] = cen[3*i  ];
+            pos[4] = cen[3*i+1];
+            pos[5] = cen[3*i+2];
             }
+        else if ( dist < con[1] ){
+            con[1] = dist;      // set second if nearer
+            pos[6] = cen[3*i  ];
+            pos[7] = cen[3*i+1];
+            pos[8] = cen[3*i+2];
+            }
+        
+        printf("%i %.12f %.12f %.12f\\n",i,dist,con[0],con[1]); //debugging output
         }
     return ret;
 }
@@ -414,25 +416,33 @@ def find_nearest_P(cen, pos, con):
     
     A C version of the same function is called find_nearest_C and accepts the same arguments.
     """
+    if len(cen)/3 < 2 or len(cen)%3 != 0 or len(pos)/3 < 3 or len(con) <3:
+        print "ERROR in find_nearest_P(): Too few centers, not 3*x coordinates, positions or constants!"
+        return -1
+        
     rel = 0
-    for i in range(len(centers)/3):
-        #print pos[0],centers[3*i],const[1]
-        dx = (min( abs(pos[0]-centers[3*i  ]), const[1]-abs(pos[0]-centers[3*i  ])))**2
-        dy = (min( abs(pos[1]-centers[3*i+1]), const[1]-abs(pos[1]-centers[3*i+1])))**2
-        dz = (min( abs(pos[2]-centers[3*i+2]), const[1]-abs(pos[2]-centers[3*i+2])))**2
-        #distsq = \
-    #(min( abs(pos[0]-centers[3*i  ]), const[1]-abs(pos[0]-centers[3*i  ])))**2\
-   #+(min( abs(pos[1]-centers[3*i+1]), const[1]-abs(pos[1]-centers[3*i+1])))**2\
-   #+(min( abs(pos[2]-centers[3*i+2]), const[1]-abs(pos[2]-centers[3*i+2])))**2
-        #print dx,dy,dz
-        distsq = dx+dy+dz
-        #print distsq
-        if distsq < const[0]**2 and exit :
-            const[2:5] = centers[3*i:3*i+3]
-            return -1
-        rel += distsq**-3
+    for i in range(len(cen)/3):
+        dxsq = (min( abs(pos[0]-cen[3*i  ]), con[2]-abs(pos[0]-cen[3*i  ])))**2
+        dysq = (min( abs(pos[1]-cen[3*i+1]), con[2]-abs(pos[1]-cen[3*i+1])))**2
+        dzsq = (min( abs(pos[2]-cen[3*i+2]), con[2]-abs(pos[2]-cen[3*i+2])))**2
+        dist = np.sqrt(dxsq+dysq+dzsq)
+        
+        if i==0:            # set both on first loop
+            con[0] = dist
+            pos[3:6] = cen[0:3]
+            con[1] = dist
+            pos[6:9] = cen[0:3]
+        elif dist < con[0]:
+            con[0], con[1] = dist, con[0]   # move first into second
+            pos[6:9] = pos[3:6]             # and new into first
+            pos[3:6] = cen[3*i:3*i+3]
+        elif dist < con[1]:
+            con[1] = dist
+            pos[6:9] = cen[3*i:3*i+3]
+
+        print i,dist,con[0],con[1]
+        
     return rel
-    return
 
 ### ### ### ### ### ### ### ### ### ### ### ### ### 
 
