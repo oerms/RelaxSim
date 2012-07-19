@@ -71,7 +71,7 @@ def overlapl(x,sigma,sigma2=None):
     return lorentzn(x,sigmanew)
     
 def quenched_diffusion(r,tau,bfield,T2n=53.5e-6,gamma=2.516e8,a=2.847e-10):
-    """Quenchen diffusion constant near paramagnetic center.
+    """Quenched diffusion constant near paramagnetic center ( D(r)/D0 = l(r)^2/l0^2 ).
     
     Input:
         r       distance
@@ -81,11 +81,42 @@ def quenched_diffusion(r,tau,bfield,T2n=53.5e-6,gamma=2.516e8,a=2.847e-10):
         T2n     nuclear spin-spin-relax time
         gamma   nuclear gyromagnetic ratio
         a       fluorine-fluorine distance (lattice constant)
+        
+    Return:
+        overlap in [0,1]
     """
     # getting constants
     avermu = avmup(bfield,tau)
     deltaomega = gamma*a*3*1e-7*avermu / r**4 # see pages 52&55 in notebook
     return overlapl(deltaomega,2*np.pi/T2n)
+    
+def quenched_step(walpos, cenpos, randir, step0, tau, bfield, **kwargs):
+    """Calculate quenched step length with angular dependence
+    
+    Input:
+        walpos  walker position     (as triple)
+        cenpos  center position     (as triple)
+        randir  random direction    (as triple)
+        step0   unquenched step length ( l0 )
+        tau     correlation time of center
+        bfield  macroscopic B0 field
+        **kwargs for quenched_diffusion() (T2n, gammaF, a)
+        
+    Output:
+        target position of walker   (as triple)
+    """
+    # compare to new notebook page 10
+    walcendis = np.linalg.norm(cenpos-walpos)   # this is |rZ-rW|
+    walcendir = (cenpos-walpos)/walcendis       # this is rZ-rW/|rZ-rW|
+    
+    overlap = quenched_diffusion(walcendis,tau,bfield,**kwargs)
+    minoraxis = step0*np.sqrt(overlap)
+    
+    firstpar  = 1 - overlap                       # this is 1 - (l(r)/l0)**2
+    secondpar = 1 - np.dot(randir,walcendir)**2
+    
+    #TODO test this!!
+    return walpos + randir * minoraxis/np.sqrt(1-firstpar*secondpar)
 
 def dens(mean_dist):
     """calculate density from average distance"""
@@ -355,7 +386,7 @@ Return:
 """
 find_code="""
 double find_nearest_C (int lencen, double* cen, int lenpos, double* pos, int lencon, double* con ){
-    double ret = 0;
+    //double ret = 0;
     double dx; double dy; double dz;
     double dist;
     //test center number
@@ -393,7 +424,7 @@ double find_nearest_C (int lencen, double* cen, int lenpos, double* pos, int len
             pos[4] = cen[3*i+1];
             pos[5] = cen[3*i+2];
             }
-        else if ( dist < con[1] ){
+         else if ( dist < con[1] ){
             con[1] = dist;      // set second if nearer
             pos[6] = cen[3*i  ];
             pos[7] = cen[3*i+1];
@@ -402,7 +433,7 @@ double find_nearest_C (int lencen, double* cen, int lenpos, double* pos, int len
         
         printf("%i %.12f %.12f %.12f\\n",i,dist,con[0],con[1]); //debugging output
         }
-    return ret;
+    return 0;
 }
 """
 find_nearest_C = inline_with_numpy(find_code, arrays = [['lencen', 'cen'],['lenpos','pos'],['lencon','con']])
@@ -412,7 +443,7 @@ def find_nearest_P(cen, pos, con):
     accumulate relaxation (sum r**-6)
     cen         flattened array of x,y,z positions of relax centers
     pos         array of x,y,z positions of walker and x,y,z of catching center
-    const       array (!) of brad and size
+    con         array (!) of pos1, pos2, size
     
     A C version of the same function is called find_nearest_C and accepts the same arguments.
     """
@@ -420,7 +451,6 @@ def find_nearest_P(cen, pos, con):
         print "ERROR in find_nearest_P(): Too few centers, not 3*x coordinates, positions or constants!"
         return -1
         
-    rel = 0
     for i in range(len(cen)/3):
         dxsq = (min( abs(pos[0]-cen[3*i  ]), con[2]-abs(pos[0]-cen[3*i  ])))**2
         dysq = (min( abs(pos[1]-cen[3*i+1]), con[2]-abs(pos[1]-cen[3*i+1])))**2
@@ -436,15 +466,42 @@ def find_nearest_P(cen, pos, con):
             con[0], con[1] = dist, con[0]   # move first into second
             pos[6:9] = pos[3:6]             # and new into first
             pos[3:6] = cen[3*i:3*i+3]
-        elif dist < con[1]:
+        elif dist < con[1] or i == 1:
             con[1] = dist
             pos[6:9] = cen[3*i:3*i+3]
 
-        print i,dist,con[0],con[1]
+        #print i,dist,con[0],con[1]
         
-    return rel
+    return 0
 
-### ### ### ### ### ### ### ### ### ### ### ### ### 
+def random_spherical_coord():
+    """generate random position on unit 3D sphere around origin
+    
+    DEPRECATED: DO NOT USE!
+    use `get_steps(1)` instead (equivalent result in less time)"""
+    while True :
+        step = rnd.uniform(-1,1,3)
+        #norm = np.linalg.norm(step)
+        norm = reduce(lambda x,y:x+math.pow(y,2),step,0) # must give a initial of 0!
+        #print "norm", norm
+        if norm <= 1 :
+            break
+    return step/np.sqrt(norm)
+
+def gen_steps(steps_number):
+    """generate random positions on unit 3D sphere around origin
+    
+    Input:
+        steps_number    number of positions to be generated
+    Output:
+        flattened array with steps_number*3 entries"""
+    # see quittek master thesis, appendix for explanation
+    z = rnd.uniform(-1,+1,steps_number)
+    theta = rnd.uniform(0,2*math.pi,steps_number)
+    rad = np.sqrt(1-z**2)
+    x = rad*np.cos(theta)
+    y = rad*np.sin(theta)
+    return np.array([x,y,z]).transpose().flatten()
 
 def intersec_sphere(r1,r2,rc,b,step,offset_factor=0.01):
     """return end position, for walker stepping from r1 to r2,
@@ -1284,29 +1341,7 @@ class RelaxExperiment():
         if walk_type != "stay" and walk_type != "step" and walk_type != "continuous": 
             raise RelaxError(20, "RelaxExperiment._run_randomwalks(): walk_type must be either 'step', 'stay', or 'continuous'!")
         else:
-            self.walk_type = walk_type
-        
-        def random_spherical_coord():
-            """generate random position on unit 3D sphere around origin"""
-            while True :
-                step = rnd.uniform(-1,1,3)
-                #norm = np.linalg.norm(step)
-                norm = reduce(lambda x,y:x+math.pow(y,2),step,0) # must give a initial of 0!
-                #print "norm", norm
-                if norm <= 1 :
-                    break
-            return step/np.sqrt(norm)
-        
-        def gen_steps(steps_number):
-            """generate random position on unit 3D sphere around origin"""
-            z = rnd.uniform(-1,+1,steps_number)
-            theta = rnd.uniform(0,2*math.pi,steps_number)
-            rad = np.sqrt(1-z**2)
-            x = rad*np.cos(theta)
-            y = rad*np.sin(theta)
-            #print "max/min:", max(z**2+y**2+z**2), min(z**2+y**2+z**2)
-            return np.array([x,y,z]).transpose().flatten()
-            
+            self.walk_type = walk_type            
             
         magntmp = np.zeros( self.steps_number+1   ,dtype='d')   # temp magnetization
         postmp  = np.zeros((self.steps_number+1)*3,dtype='d')   # temp position
@@ -1464,7 +1499,7 @@ class RelaxExperiment():
                         dist6 = 1.-self.dt*self.C*dist6                 # calculate relaxation rate
                         magnetization[step+1] = magnetization[step]*dist6      # apply relaxation rate (clamp included)
                         step3 = step*3
-                        step_coords = random_spherical_coord()*self.dx
+                        step_coords = gen_steps(1)*self.dx
                         position[step3+3:step3+6] = position[step3:step3+3]+step_coords # make the step
                         #correct for periodic boundaries
                         if position[step3+3]>self.size:
@@ -1512,7 +1547,7 @@ class RelaxExperiment():
                         dist6 = 1.-self.dt*self.C*dist6                 # calculate relaxation rate
                         magnetization[step+1] = magnetization[step]*dist6      # apply relaxation rate (clamp included)
                         step3 = step*3
-                        step_coords = random_spherical_coord()*self.dx
+                        step_coords = gen_steps(1)*self.dx
                         position[step3+3:step3+6] = position[step3:step3+3]+step_coords # make the step
                         #correct for periodic boundaries
                         if position[step3+3]>self.size:
