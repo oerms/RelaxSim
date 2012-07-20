@@ -106,14 +106,26 @@ def quenched_step(walpos, cenpos, randir, step0, tau, bfield, **kwargs):
         target position of walker   (as triple)
     """
     # compare to new notebook page 10
+    
+    # test input
+    if type(walpos) is not np.ndarray or type(cenpos) is not np.ndarray \
+            or type(randir) is not np.ndarray:
+        print "ERROR in quenched_step(): wrong type of walpos, cenpos, or randir!"
+    
     walcendis = np.linalg.norm(cenpos-walpos)   # this is |rZ-rW|
     walcendir = (cenpos-walpos)/walcendis       # this is rZ-rW/|rZ-rW|
     
+    print 'pos',cenpos,walpos
+    print 'walcen',walcendir,walcendis
+    
     overlap = quenched_diffusion(walcendis,tau,bfield,**kwargs)
+    #print 'overlap',overlap
+    
     minoraxis = step0*np.sqrt(overlap)
     
     firstpar  = 1 - overlap                       # this is 1 - (l(r)/l0)**2
     secondpar = 1 - np.dot(randir,walcendir)**2
+    #print "inquenstep():",firstpar,secondpar
     
     #TODO test this!!
     return walpos + randir * minoraxis/np.sqrt(1-firstpar*secondpar)
@@ -389,6 +401,11 @@ double find_nearest_C (int lencen, double* cen, int lenpos, double* pos, int len
     //double ret = 0;
     double dx; double dy; double dz;
     double dist;
+    
+    //reset distances
+    con[0] = 0;
+    con[1] = 0;
+    
     //test center number
     if ( (lencen/3 < 2) || (lencen%3 != 0) || (lenpos/3 < 3) || (lencon < 3) ){
         printf("ERROR in find_nearest_C(): Too few centers, not 3*x coordinates, positions or constants!\\n");
@@ -431,7 +448,8 @@ double find_nearest_C (int lencen, double* cen, int lenpos, double* pos, int len
             pos[8] = cen[3*i+2];
             }
         
-        printf("%i %.12f %.12f %.12f\\n",i,dist,con[0],con[1]); //debugging output
+        //printf("in find_nearest_C(): %i %.12f %.12f %.12f\\n",i,dist,con[0],con[1]); //debugging output
+        //printf("in find_nearest_C(): %i %.12f %.12f %.12f\\n",i,cen[3*i],pos[0],pos[1]); //debugging output
         }
     return 0;
 }
@@ -442,15 +460,23 @@ def find_nearest_P(cen, pos, con):
     """
     accumulate relaxation (sum r**-6)
     cen         flattened array of x,y,z positions of relax centers
-    pos         array of x,y,z positions of walker and x,y,z of catching center
+    pos         array of x,y,z positions of walker and x,y,z of _two_ nearest centers
     con         array (!) of pos1, pos2, size
     
     A C version of the same function is called find_nearest_C and accepts the same arguments.
     """
-    if len(cen)/3 < 2 or len(cen)%3 != 0 or len(pos)/3 < 3 or len(con) <3:
-        print "ERROR in find_nearest_P(): Too few centers, not 3*x coordinates, positions or constants!"
+    if len(cen)/3 < 2 or len(cen)%3 != 0:
+        print "ERROR in find_nearest_P(): Too few centers, not 3*x coordinates"
         return -1
-        
+
+    if len(pos)/3 < 3 or len(con) < 3:
+        print len(pos)
+        print "ERROR in find_nearest_P(): Too few positions or constants!"
+        return -1
+    
+    #reset
+    con[0:2] = 0
+    
     for i in range(len(cen)/3):
         dxsq = (min( abs(pos[0]-cen[3*i  ]), con[2]-abs(pos[0]-cen[3*i  ])))**2
         dysq = (min( abs(pos[1]-cen[3*i+1]), con[2]-abs(pos[1]-cen[3*i+1])))**2
@@ -568,7 +594,7 @@ class RelaxError(Exception):
 
 class RelaxCenters():
     """A class for the "sample": the positions of the paramagnetic centers, and other constants."""
-    def __init__(self, size, density, C, D, b, distribution="homogeneous",halo_rad=5e-9,name="",centers=None):
+    def __init__(self, size, density, C, D, b, tau=1e-4, bfield=1, distribution="homogeneous",halo_rad=5e-9,name="",centers=None):
         """constructor
 
         input:
@@ -578,6 +604,7 @@ class RelaxCenters():
             D           m^2/s
             b           m
         optional input:
+            tau,bfield  required for later 
             distribution    "homogenous", "clustered", etc.
             halo_rad    m
             name                                string
@@ -593,6 +620,8 @@ class RelaxCenters():
         self.C          = C
         self.D          = D
         self.b          = b
+        self.tau        = tau
+        self.bfield     = bfield
         self.distribution= distribution
         # numbers of centers in center box
         self.center_number = int(density*size**3)
@@ -1530,40 +1559,35 @@ class RelaxExperiment():
                 magnetization   contains the magnetization
                 position        contains the walker's positions"""
                 
-                array_for_rate = np.array([self.b,self.size],dtype="d")
+                pos_array_for_find = np.zeros(9,dtype='d')
+                con_array_for_find = np.array([0,0,self.size],dtype='d')
                 centers = self.center_positions.flatten()
+                
+                # random steps
+                step_array = gen_steps(self.steps_number)
+                
+                # nonfree radius around centers (walker cannot walk freely if closer than this)
+                nonfree_rad_cen = max(self.b*3,(self.dt*self.C*1e6)**(1/6.))
+                
+                
                 # start the steps
                 for step in range(self.steps_number):
-                    # accumulate distance**-6
-                    dist6 = accum_dist_C(centers, array_for_rate, position[step:step+3])
-                    if dist6 == -1 :
-                        dist6 = 1.-self.dt*self.C*self.b**-6            # calculate relaxation rate
-                        position[3*step+3::3] = position[3*step  ]      # do not step anymore
-                        position[3*step+4::3] = position[3*step+1]
-                        position[3*step+5::3] = position[3*step+2]
-                        magnetization[step+1:] = magnetization[step]* dist6**np.arange(self.steps_number-step)     # relaxate by simple multiplication        
-                        break                                           # break out of stepping loop
-                    else:
-                        dist6 = 1.-self.dt*self.C*dist6                 # calculate relaxation rate
-                        magnetization[step+1] = magnetization[step]*dist6      # apply relaxation rate (clamp included)
-                        step3 = step*3
-                        step_coords = gen_steps(1)*self.dx
-                        position[step3+3:step3+6] = position[step3:step3+3]+step_coords # make the step
-                        #correct for periodic boundaries
-                        if position[step3+3]>self.size:
-                            position[step3+3] -= self.size
-                        if position[step3+3]<0:
-                            position[step3+3] += self.size
-                        if position[step3+4]>self.size:
-                            position[step3+4] -= self.size
-                        if position[step3+4]<0:
-                            position[step3+4] += self.size
-                        if position[step3+5]>self.size:
-                            position[step3+5] -= self.size
-                        if position[step3+5]<0:
-                            position[step3+5] += self.size
-                actwalktmp[step+1:] = 0
-                return step       # returns last step
+                    pos_array_for_find[0:3] = position[step*3:step*3+3]
+                    print 'posarray:',pos_array_for_find
+                    if find_nearest_C(centers,pos_array_for_find,con_array_for_find) == -1:
+                        raise RelaxError(22, "CRITICAL ERROR in continuous relax_rw()!")
+                    #if con_array_for_find[0] > nonfree_rad_cen+dx:
+                        #do something to skip steps
+                    print 'step, conarray:',step,con_array_for_find
+                    relfac = 1-self.dt*self.C*(1/con_array_for_find[0]**6+1/con_array_for_find[1]**6)
+                    print relfac
+                    magnetization[step+1] = relfac*magnetization[step]
+                    step_coords = quenched_step(position[step*3:step*3+3],pos_array_for_find[3:6],step_array[step*3:step*3+3],self.dx,self.centers.tau,self.centers.bfield)
+                    print 'setpcoords:',step_coords
+                    position[(step+1)*3:(step+1)*3+3] = position[step*3:step*3+3] + step_coords
+                    
+                    
+                return step
         else:
             raise RelaxError(21,"Something bad has happened in RelaxExperiment._run_randomwalks(): unknown walk type or fake simulation.")
         # end ifelse walk_type/fake
