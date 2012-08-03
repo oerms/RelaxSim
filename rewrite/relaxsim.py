@@ -90,12 +90,13 @@ def quenched_diffusion(r,tau,bfield,T2n=53.5e-6,gamma=2.516e8,a=2.847e-10):
     deltaomega = gamma*a*3*1e-7*avermu / r**4 # see pages 52&55 in notebook
     return overlapl(deltaomega,2*np.pi/T2n)
     
-def quenched_step(walpos, cenpos, randir, step0, tau, bfield, **kwargs):
-    """Calculate quenched step length with angular dependence
+def quenched_step(walpos, cenpos, cenpos2, randir, step0, tau, bfield, **kwargs):
+    """Calculate quenched step (length & direction) with angular dependence
     
     Input:
         walpos  walker position     (as triple)
         cenpos  center position     (as triple)
+        cenpos2 second center position     (as triple)
         randir  random direction    (as triple)
         step0   unquenched step length ( l0 )
         tau     correlation time of center
@@ -103,7 +104,7 @@ def quenched_step(walpos, cenpos, randir, step0, tau, bfield, **kwargs):
         **kwargs for quenched_diffusion() (T2n, gammaF, a)
         
     Output:
-        target position of walker   (as triple)
+        step coordinates of walker   (as triple)
     """
     # compare to new notebook page 10
     
@@ -115,8 +116,8 @@ def quenched_step(walpos, cenpos, randir, step0, tau, bfield, **kwargs):
     walcendis = np.linalg.norm(cenpos-walpos)   # this is |rZ-rW|
     walcendir = (cenpos-walpos)/walcendis       # this is rZ-rW/|rZ-rW|
     
-    print 'pos',cenpos,walpos
-    print 'walcen',walcendir,walcendis
+    #print 'pos',cenpos,walpos
+    #print 'walcen',walcendir,walcendis
     
     overlap = quenched_diffusion(walcendis,tau,bfield,**kwargs)
     #print 'overlap',overlap
@@ -127,8 +128,25 @@ def quenched_step(walpos, cenpos, randir, step0, tau, bfield, **kwargs):
     secondpar = 1 - np.dot(randir,walcendir)**2
     #print "inquenstep():",firstpar,secondpar
     
-    #TODO test this!!
-    return walpos + randir * minoraxis/np.sqrt(1-firstpar*secondpar)
+    ### second center from here
+    
+    #walcendis2 = np.linalg.norm(cenpos2-walpos)   # this is |rZ-rW|
+    #walcendir2 = (cenpos2-walpos)/walcendis2       # this is rZ-rW/|rZ-rW|
+    
+    ##print 'pos',cenpos,walpos
+    ##print 'walcen',walcendir,walcendis
+    
+    #overlap2 = quenched_diffusion(walcendis2,tau,bfield,**kwargs)
+    ##print 'overlap',overlap
+    
+    #minoraxis2 = step0*np.sqrt(overlap2)
+    
+    #firstpar2  = 1 - overlap2                       # this is 1 - (l(r)/l0)**2
+    #secondpar2 = 1 - np.dot(randir,walcendir2)**2
+    ##print "inquenstep():",firstpar,secondpar
+    
+    #return randir * minoraxis/np.sqrt(1-firstpar*secondpar) * minoraxis2/np.sqrt(1-firstpar2*secondpar2)/step0
+    return randir * minoraxis/np.sqrt(1-firstpar*secondpar)
 
 def dens(mean_dist):
     """calculate density from average distance"""
@@ -461,7 +479,7 @@ def find_nearest_P(cen, pos, con):
     accumulate relaxation (sum r**-6)
     cen         flattened array of x,y,z positions of relax centers
     pos         array of x,y,z positions of walker and x,y,z of _two_ nearest centers
-    con         array (!) of pos1, pos2, size
+    con         array (!) of distance nearest--walker, distance second nearest--walker, size
     
     A C version of the same function is called find_nearest_C and accepts the same arguments.
     """
@@ -489,11 +507,11 @@ def find_nearest_P(cen, pos, con):
             con[1] = dist
             pos[6:9] = cen[0:3]
         elif dist < con[0]:
-            con[0], con[1] = dist, con[0]   # move first into second
-            pos[6:9] = pos[3:6]             # and new into first
+            con[0], con[1] = dist, con[0]   # move nearest into second nearest
+            pos[6:9] = pos[3:6]             # and new into nearest
             pos[3:6] = cen[3*i:3*i+3]
-        elif dist < con[1] or i == 1:
-            con[1] = dist
+        elif dist < con[1] or i == 1:       # move new into second nearest
+            con[1] = dist                   # if nearer of if second run
             pos[6:9] = cen[3*i:3*i+3]
 
         #print i,dist,con[0],con[1]
@@ -1572,20 +1590,29 @@ class RelaxExperiment():
                 
                 # start the steps
                 for step in range(self.steps_number):
-                    pos_array_for_find[0:3] = position[step*3:step*3+3]
-                    print 'posarray:',pos_array_for_find
+                    pos_array_for_find[0:3] = position[step*3:step*3+3] # update walker position
+                    #print 'posarray:',pos_array_for_find
                     if find_nearest_C(centers,pos_array_for_find,con_array_for_find) == -1:
                         raise RelaxError(22, "CRITICAL ERROR in continuous relax_rw()!")
                     #if con_array_for_find[0] > nonfree_rad_cen+dx:
                         #do something to skip steps
-                    print 'step, conarray:',step,con_array_for_find
-                    relfac = 1-self.dt*self.C*(1/con_array_for_find[0]**6+1/con_array_for_find[1]**6)
-                    print relfac
+                    #print 'step, conarray:',step,con_array_for_find
+                    relfac = 1-self.dt*self.C*(con_array_for_find[0]**-6+con_array_for_find[1]**-6)
+                    if step == 0 and relfac < 0.1:
+                        magnetization[:] = 0
+                        print "walker starting position too near to center!"
+                        break
+                    #print "relfac", relfac
                     magnetization[step+1] = relfac*magnetization[step]
+                    #step_coords = quenched_step(position[step*3:step*3+3],pos_array_for_find[3:6],pos_array_for_find[6:9],step_array[step*3:step*3+3],self.dx,self.centers.tau,self.centers.bfield)
                     step_coords = quenched_step(position[step*3:step*3+3],pos_array_for_find[3:6],step_array[step*3:step*3+3],self.dx,self.centers.tau,self.centers.bfield)
-                    print 'setpcoords:',step_coords
+                    distcen = np.linalg.norm(pos_array_for_find[0:3]-pos_array_for_find[3:6])/self.b
+                    print "relfac", relfac, 'length of step/step0:',np.linalg.norm(step_coords)/self.dx, "distance to center/b",distcen
                     position[(step+1)*3:(step+1)*3+3] = position[step*3:step*3+3] + step_coords
-                    
+                    fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size])) # walker needs  to stay inside periodic boundaries!
+                    # test if walker too near to a center via find_nearest_C()
+                    #   if yes: new step_coords = quenched_step(..., nearest center,...)
+                    #
                     
                 return step
         else:
