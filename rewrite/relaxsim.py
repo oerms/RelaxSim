@@ -90,13 +90,12 @@ def quenched_diffusion(r,tau,bfield,T2n=53.5e-6,gamma=2.516e8,a=2.847e-10):
     deltaomega = gamma*a*3*1e-7*avermu / r**4 # see pages 52&55 in notebook
     return overlapl(deltaomega,2*np.pi/T2n)
     
-def quenched_step(walpos, cenpos, cenpos2, randir, step0, tau, bfield, **kwargs):
+def quenched_step(walpos, cenpos, randir, step0, tau, bfield, **kwargs):
     """Calculate quenched step (length & direction) with angular dependence
     
     Input:
         walpos  walker position     (as triple)
         cenpos  center position     (as triple)
-        cenpos2 second center position     (as triple)
         randir  random direction    (as triple)
         step0   unquenched step length ( l0 )
         tau     correlation time of center
@@ -119,33 +118,16 @@ def quenched_step(walpos, cenpos, cenpos2, randir, step0, tau, bfield, **kwargs)
     #print 'pos',cenpos,walpos
     #print 'walcen',walcendir,walcendis
     
-    overlap = quenched_diffusion(walcendis,tau,bfield,**kwargs)
+    overlap = quenched_diffusion(walcendis,tau,bfield,**kwargs) # this is D(r)/D0 = l(r)^2/l0^2
     #print 'overlap',overlap
     
     minoraxis = step0*np.sqrt(overlap)
     
     firstpar  = 1 - overlap                       # this is 1 - (l(r)/l0)**2
     secondpar = 1 - np.dot(randir,walcendir)**2
+    print "secondpar = sin^2 theta",secondpar,"theta",np.sqrt(np.arcsin(secondpar))
     #print "inquenstep():",firstpar,secondpar
-    
-    ### second center from here
-    
-    #walcendis2 = np.linalg.norm(cenpos2-walpos)   # this is |rZ-rW|
-    #walcendir2 = (cenpos2-walpos)/walcendis2       # this is rZ-rW/|rZ-rW|
-    
-    ##print 'pos',cenpos,walpos
-    ##print 'walcen',walcendir,walcendis
-    
-    #overlap2 = quenched_diffusion(walcendis2,tau,bfield,**kwargs)
-    ##print 'overlap',overlap
-    
-    #minoraxis2 = step0*np.sqrt(overlap2)
-    
-    #firstpar2  = 1 - overlap2                       # this is 1 - (l(r)/l0)**2
-    #secondpar2 = 1 - np.dot(randir,walcendir2)**2
-    ##print "inquenstep():",firstpar,secondpar
-    
-    #return randir * minoraxis/np.sqrt(1-firstpar*secondpar) * minoraxis2/np.sqrt(1-firstpar2*secondpar2)/step0
+
     return randir * minoraxis/np.sqrt(1-firstpar*secondpar)
 
 def dens(mean_dist):
@@ -1117,7 +1099,9 @@ class RelaxExperiment():
             deterministic:
                 dt          set a timestep manually
             randomwalks:
-                none
+                walk_type   step: walk away from center again, after hitting hard quenching radius
+                            stay: stay at first contact with hard quenching radius
+                            continuous: quenching with continuous step length
         """
         if not isinstance(centers,RelaxCenters):
             raise RelaxError(1,"center input in RelaxExperiment instance is not of class RelaxCenters!")
@@ -1147,8 +1131,12 @@ class RelaxExperiment():
         if self.size < 10*self.dx or self.b < self.dx:
             raise RelaxError(15,"RelaxExperiment.init_deterministic(): dx too large")
         
+        
         self.method = method
         if self.method=="randomwalks" or self.method == "ran":
+            if dxb_ratio > 1/6.:
+                dxb_ratio = 1/6.
+                self.dx  = self.b*dxb_ratio
             self._init_randomwalks(**kwargs)
         elif method=="deterministic" or self.method == "det":
             self._init_deterministic(**kwargs)
@@ -1336,17 +1324,27 @@ class RelaxExperiment():
 
         print "ran deterministic experiment in {0:.0f}s.".format(t.time() - t_detrun_b)
 
-    def _init_randomwalks(self):
-        """Initialize random walks"""
+    def _init_randomwalks(self,walk_type="stay"):
+        """Initialize random walks
+        
+            walk_type       step: walk away from center again, after hitting hard quenching radius
+                    stay: stay at first contact with hard quenching radius
+                    continuous: quenching with continuous step length"""
         self.dt   = self.dx**2./(6*self.D)
         if self.evolution_time < self.dt:
             raise RelaxError(16,"RelaxExperiment.init_randomwalks(): dt > t_evo")
-        if self.dt*self.C/self.b**6>0.6:
+        if 1-self.dt*self.C/self.b**6 < 0.4:
             print "WARNING: dt and dx were reset to meet stability at radius b!"
-            self.dt = self.b**6/self.C*0.6
+            self.dt = self.b**6/self.C*(1-0.4)
             self.dx = np.sqrt(6*self.D*self.dt)
         self.steps_number = int(self.evolution_time/self.dt)
-        self.MSD  = math.sqrt(6*self.D*self.evolution_time) 
+        self.MSD  = math.sqrt(6*self.D*self.evolution_time)
+        
+        # verify walk_type
+        if walk_type != "stay" and walk_type != "step" and walk_type != "continuous": 
+            raise RelaxError(20, "RelaxExperiment._run_randomwalks(): walk_type must be either 'step', 'stay', or 'continuous'!")
+        else:
+            self.walk_type = walk_type            
         
         # plotting some information
         print "initializing walks"
@@ -1365,7 +1363,7 @@ class RelaxExperiment():
         self.timearray      = np.arange(0, self.dt*(self.steps_number+1/2.), self.dt)
     
     
-    def _run_randomwalks(self,walks=10,plotaxes=None,background = 0,threshhold=1e-4,walk_type="stay"):
+    def _run_randomwalks(self,walks=10,plotaxes=None,background = 0,threshhold=1e-4):
         """Run random walks.
         
         optional arguments
@@ -1375,20 +1373,12 @@ class RelaxExperiment():
                              0 for no relaxation,
                              ~7e-2 /s as usual rate (4mm sample klempt2003 paper)
             threshhold      threshhold magnetization for stopping walks
-            walk_type       step: walk away from center again, after hitting hard quenching radius
-                            stay: stay at first contact with hard quenching radius
-                            continuous: quenching with continuous step length
+
         """
         self.starttime = time.strftime("%Y/%m/%d %H:%M:%S")
         from numpy.linalg import norm as vnorm
         self.walkers_number = walks
         print "number of walkers:  ", self.walkers_number
-        
-        # verify walk_type
-        if walk_type != "stay" and walk_type != "step" and walk_type != "continuous": 
-            raise RelaxError(20, "RelaxExperiment._run_randomwalks(): walk_type must be either 'step', 'stay', or 'continuous'!")
-        else:
-            self.walk_type = walk_type            
             
         magntmp = np.zeros( self.steps_number+1   ,dtype='d')   # temp magnetization
         postmp  = np.zeros((self.steps_number+1)*3,dtype='d')   # temp position
@@ -1416,7 +1406,7 @@ class RelaxExperiment():
                 actwalktmp[:] = (np.exp(-10*self.timearray/self.evolution_time)-rnd.uniform(low=0,high=0.1,size=(len(magnetization),)))[:]
                 return 0
 
-        elif walk_type == 'step': # 
+        elif self.walk_type == 'step': # 
             def relax_rw(position, magnetization, actwalktmp, threshhold=threshhold):
                 """Uniform random walk with relaxating magnetization.
                 The walker may walk away from the center after being stopped.
@@ -1515,7 +1505,7 @@ class RelaxExperiment():
                 if returnstep == -1:
                     returnstep = step
                 return returnstep
-        elif walk_type == "stay":
+        elif self.walk_type == "stay":
             def relax_rw(position, magnetization, actwalktmp):
                 """Uniform random walk with relaxating magnetization.
                 The walker cannot walk away from the center.
@@ -1563,7 +1553,7 @@ class RelaxExperiment():
                             position[step3+5] += self.size
                 actwalktmp[step+1:] = 0
                 return step       # returns last step
-        elif walk_type == "continuous":
+        elif self.walk_type == "continuous":
             def relax_rw(position, magnetization, actwalktmp):
                 """Uniform random walk with relaxating magnetization.
                 The walker cannot walk away from the center.
@@ -1571,7 +1561,7 @@ class RelaxExperiment():
                 
                 Input:
                     position        position vector             len = 3*(steps+1)
-                    magnetization   magnetization               len = steps+1
+                    magnetization   magnetization               len =    steps+1
                     actwalktmp      active walkers              len =    steps+1
                 
                 magnetization   contains the magnetization
@@ -1586,34 +1576,58 @@ class RelaxExperiment():
                 
                 # nonfree radius around centers (walker cannot walk freely if closer than this)
                 nonfree_rad_cen = max(self.b*3,(self.dt*self.C*1e6)**(1/6.))
-                
+                free_steps = 0
                 
                 # start the steps
                 for step in range(self.steps_number):
+                    if free_steps > 0:      # do some free steps
+                        position[3*step+3:3*step+6] = position[3*step:3*step+3]+step_array[3*step:3*step+3] # do simple step
+                        magnetization[step+1]       = magnetization[step]                                   # copy magnetization 
+                        free_steps -= 1
+                        #print "skipping step..."
+                        continue
+                    
+                    if magnetization[step] < 1e-4:  # stop walking if already relaxed
+                        magnetization[step+1:] = 0
+                        position[3*step+3::3] = position[3*step  ]      # do not step anymore
+                        position[3*step+4::3] = position[3*step+1]
+                        position[3*step+5::3] = position[3*step+2]
+                        print "walker too weak... setting to zero"
+                        break
+                    
                     pos_array_for_find[0:3] = position[step*3:step*3+3] # update walker position
                     #print 'posarray:',pos_array_for_find
                     if find_nearest_C(centers,pos_array_for_find,con_array_for_find) == -1:
                         raise RelaxError(22, "CRITICAL ERROR in continuous relax_rw()!")
-                    #if con_array_for_find[0] > nonfree_rad_cen+dx:
-                        #do something to skip steps
+                    
+                    if con_array_for_find[0] > nonfree_rad_cen+self.dx: # calculate free steps
+                        free_steps = int((con_array_for_find[0]-nonfree_rad_cen)/self.dx)
+                    
                     #print 'step, conarray:',step,con_array_for_find
                     relfac = 1-self.dt*self.C*(con_array_for_find[0]**-6+con_array_for_find[1]**-6)
                     if step == 0 and relfac < 0.1:
-                        magnetization[:] = 0
-                        print "walker starting position too near to center!"
+                        magnetization[1:] = 0                           # set magentization to zero and
+                        position[3*step+3::3] = position[3*step  ]      # do not step anymore
+                        position[3*step+4::3] = position[3*step+1]
+                        position[3*step+5::3] = position[3*step+2]
+                        print "continuous walk: walkers starting position too near to center. Instant relaxation."
                         break
-                    #print "relfac", relfac
+                        
+                    if relfac < 0.1:    # for debugging only
+                        print con_array_for_find[0]/self.dx, con_array_for_find[1]/self.dx
+                        print "ERROR in continuous walk: relfac TOO SMALL:", relfac
                     magnetization[step+1] = relfac*magnetization[step]
-                    #step_coords = quenched_step(position[step*3:step*3+3],pos_array_for_find[3:6],pos_array_for_find[6:9],step_array[step*3:step*3+3],self.dx,self.centers.tau,self.centers.bfield)
-                    step_coords = quenched_step(position[step*3:step*3+3],pos_array_for_find[3:6],step_array[step*3:step*3+3],self.dx,self.centers.tau,self.centers.bfield)
-                    distcen = np.linalg.norm(pos_array_for_find[0:3]-pos_array_for_find[3:6])/self.b
-                    print "relfac", relfac, 'length of step/step0:',np.linalg.norm(step_coords)/self.dx, "distance to center/b",distcen
-                    position[(step+1)*3:(step+1)*3+3] = position[step*3:step*3+3] + step_coords
-                    fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size])) # walker needs  to stay inside periodic boundaries!
-                    # test if walker too near to a center via find_nearest_C()
-                    #   if yes: new step_coords = quenched_step(..., nearest center,...)
-                    #
                     
+                    # calculate step
+                    if con_array_for_find[1] < 3*self.dx: # if there are two (ore more) centers nearby:
+                        step_coords = self.dx*np.sqrt(quenched_diffusion(con_array_for_find[0],self.centers.tau,self.centers.bfield)) # take small sphere instead of ellipse
+                    else:   # if not: normal step
+                        #step_coords = self.dx*np.sqrt(quenched_diffusion(con_array_for_find[0],self.centers.tau,self.centers.bfield)) # take small sphere instead of ellipse
+                        step_coords = quenched_step(pos_array_for_find[0:3],pos_array_for_find[3:6],step_array[step*3:step*3+3],self.dx,self.centers.tau,self.centers.bfield)
+                    print "relfac", relfac, 'length of step/dx:',np.linalg.norm(step_coords)/self.dx, "distances to centers",con_array_for_find[0]/self.dx,con_array_for_find[1]/self.dx
+                    position[(step+1)*3:(step+1)*3+3] = position[step*3:step*3+3] + step_coords # step and foldback
+                    fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size]))
+                                        
                 return step
         else:
             raise RelaxError(21,"Something bad has happened in RelaxExperiment._run_randomwalks(): unknown walk type or fake simulation.")
