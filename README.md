@@ -8,8 +8,6 @@ planned additions
 (sorted by urgency)
 
 * do not remember every step => save RAM (in fake simulation as well!)
-* continuous quenching
-* omit steps if far from centers (can be part of continuous quenching)
 * clean up variables (is `C` really a local var of Experiment?)
 * clean up error codes in `RelaxError` class
 * make walk class?!
@@ -21,15 +19,27 @@ planned additions
 changelog
 ---------
 
-v5 (no tagged commit yet, working copy):
+v6 (nothing tagged yet):
 additions:
-* implement "fake simulation" for fast execution while debugging: `fake=True` in `RelaxExperiment()`
-* add function `quenched_diffusion()` for continous diffusion quenching with radial dependence
-* new C function for searching nearest centers
-
 
 fixes:
+
+v5:
+additions:
+* continuous quenching
+* omit steps if far from centers (can be part of continuous quenching)
+* implement "fake simulation" for fast execution while debugging: `fake=True` in `RelaxExperiment()`
+* add function `quenched_diffusion()` for continous diffusion quenching with radial dependence
+* add function `quenched_step()` for continous quenched step: use an ellipse of step lengths
+* new C function for searching two nearest centers
+
+fixes/changes:
 * `overlapl()` used gauss function instead of lorentzian => fix also plot `continbrad_thesis_overlmsdradii_neu.pdf`
+* when fitting T1 and beta could be negative => modified `strexpdecay()` in `RelaxResult.read_experiment()`
+* make parameter `b` optional input in `pull_center()`, default to `size/2` if not given
+* `RelaxCenters()` now takes `tau` and `bfield` as optional parameters and `RelaxResult` saves it
+* `RelaxExperiment._init_randomwalks()` now takes the parameter about what type of walk. Should be passed down as `**kwargs` from `RelaxExperiment()`.
+* 
 
 v4:
 additions:
