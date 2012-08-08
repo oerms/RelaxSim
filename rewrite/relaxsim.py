@@ -90,13 +90,14 @@ def quenched_diffusion(r,tau,bfield,T2n=53.5e-6,gamma=2.516e8,a=2.847e-10):
     deltaomega = gamma*a*3*1e-7*avermu / r**4 # see pages 52&55 in notebook
     return overlapl(deltaomega,2*np.pi/T2n)
     
-def quenched_step(walpos, cenpos, randir, step0, tau, bfield, **kwargs):
+def quenched_step(walpos, cenpos, randir, size, step0, tau, bfield, **kwargs):
     """Calculate quenched step (length & direction) with angular dependence
     
     Input:
         walpos  walker position     (as triple)
         cenpos  center position     (as triple)
         randir  random direction    (as triple)
+        size    of periodic boundaries
         step0   unquenched step length ( l0 )
         tau     correlation time of center
         bfield  macroscopic B0 field
@@ -112,21 +113,17 @@ def quenched_step(walpos, cenpos, randir, step0, tau, bfield, **kwargs):
             or type(randir) is not np.ndarray:
         print "ERROR in quenched_step(): wrong type of walpos, cenpos, or randir!"
     
+    cenpos = pull_center(cenpos,walpos,size)
+    
     walcendis = np.linalg.norm(cenpos-walpos)   # this is |rZ-rW|
     walcendir = (cenpos-walpos)/walcendis       # this is rZ-rW/|rZ-rW|
     
-    #print 'pos',cenpos,walpos
-    #print 'walcen',walcendir,walcendis
-    
     overlap = quenched_diffusion(walcendis,tau,bfield,**kwargs) # this is D(r)/D0 = l(r)^2/l0^2
-    #print 'overlap',overlap
-    
+      
     minoraxis = step0*np.sqrt(overlap)
     
     firstpar  = 1 - overlap                       # this is 1 - (l(r)/l0)**2
     secondpar = 1 - np.dot(randir,walcendir)**2
-    print "secondpar = sin^2 theta",secondpar,"theta",np.sqrt(np.arcsin(secondpar))
-    #print "inquenstep():",firstpar,secondpar
 
     return randir * minoraxis/np.sqrt(1-firstpar*secondpar)
 
@@ -421,6 +418,7 @@ double find_nearest_C (int lencen, double* cen, int lenpos, double* pos, int len
         dz = (fabs(pos[2]-cen[3*i+2])) < fabs(con[2]-fabs(pos[2]-cen[3*i+2])) ?\
              (fabs(pos[2]-cen[3*i+2])) : fabs(con[2]-fabs(pos[2]-cen[3*i+2]));
         dist = sqrt(dx*dx + dy*dy + dz*dz);
+        
         if ( i == 0 ){      // set both on first loop
             con[0] = dist;
             pos[3] = cen[0];
@@ -441,7 +439,7 @@ double find_nearest_C (int lencen, double* cen, int lenpos, double* pos, int len
             pos[4] = cen[3*i+1];
             pos[5] = cen[3*i+2];
             }
-         else if ( dist < con[1] ){
+         else if ( (dist < con[1]) || (i == 1) ){
             con[1] = dist;      // set second if nearer
             pos[6] = cen[3*i  ];
             pos[7] = cen[3*i+1];
@@ -557,24 +555,23 @@ def intersec_sphere(r1,r2,rc,b,step,offset_factor=0.01):
     # return a point which is slightly outside the sphere around rc (distance = offset_factor*b)
     return intersec*(1+offset_factor) - rc*offset_factor
 
-def pull_center(cenpos,pos,size,b):
-    """adjust center position periodically to get smallest distance to position"""
-    #print "cenpos",cenpos.shape
-    #print "pos   ",pos
+def pull_center(cenpos,walpos,size,b=None):
+    """adjust center position periodically to get smallest distance to position
+    
+    cenpos  center position
+    walpos  walker position
+    size    of periodic boundaries
+    """
+    if b == None:
+        b = size/2
     retpos = np.empty(cenpos.shape)
-    #print "retpos",retpos
-    #print "in pull: len cenpos", len(cenpos)
     for dim in range(len(cenpos)):
-        #print "dim",dim
-        if cenpos[dim]-pos[dim] > b:
+        if cenpos[dim]-walpos[dim] > b:
             retpos[dim] = cenpos[dim] - size
-        elif pos[dim]-cenpos[dim] > b:
+        elif walpos[dim]-cenpos[dim] > b:
             retpos[dim] = cenpos[dim] + size
         else:
             retpos[dim] = cenpos[dim]
-    #print "old center",cenpos/size
-    #print "new center",retpos/size
-    #print "! ! ! ! pulled center ! ! ! !"
     return retpos
 
 ## ## ## ## HELPER FUNCTIONS END ## ## ## ##
@@ -852,7 +849,11 @@ class RelaxResult():
         print "Data has successfully been read into RelaxResult. Now fitting data to exponential decay."
         
         # fit data to exponential decay
+        np.seterr(invalid='warn')
         def strexpdecay(par,x):
+            #print "parameter beta",par[0],par[1]
+            if par[0] < 0 or par[1] < 0:    # this partially prevents warnings/errors in fit
+                return np.ones(x.shape)*100
             return np.exp(-(x/par[0])**par[1])
         strexpmodel = odr.Model(strexpdecay)
         # with error or without?
@@ -1134,8 +1135,8 @@ class RelaxExperiment():
         
         self.method = method
         if self.method=="randomwalks" or self.method == "ran":
-            if dxb_ratio > 1/6.:
-                dxb_ratio = 1/6.
+            if dxb_ratio > 1/4.:
+                dxb_ratio = 1/4.
                 self.dx  = self.b*dxb_ratio
             self._init_randomwalks(**kwargs)
         elif method=="deterministic" or self.method == "det":
@@ -1554,6 +1555,7 @@ class RelaxExperiment():
                 actwalktmp[step+1:] = 0
                 return step       # returns last step
         elif self.walk_type == "continuous":
+            np.seterr(invalid='raise')
             def relax_rw(position, magnetization, actwalktmp):
                 """Uniform random walk with relaxating magnetization.
                 The walker cannot walk away from the center.
@@ -1567,8 +1569,8 @@ class RelaxExperiment():
                 magnetization   contains the magnetization
                 position        contains the walker's positions"""
                 
-                pos_array_for_find = np.zeros(9,dtype='d')
-                con_array_for_find = np.array([0,0,self.size],dtype='d')
+                pos_array_for_find = np.zeros(9,dtype='d')              # array of x,y,z of walker and x,y,z of _two_ nearest centers
+                con_array_for_find = np.array([0,0,self.size],dtype='d')# array of distance nearest--walker, distance second nearest--walker, size
                 centers = self.center_positions.flatten()
                 
                 # random steps
@@ -1580,6 +1582,7 @@ class RelaxExperiment():
                 
                 # start the steps
                 for step in range(self.steps_number):
+                    #print "new loop"
                     if free_steps > 0:      # do some free steps
                         position[3*step+3:3*step+6] = position[3*step:3*step+3]+step_array[3*step:3*step+3] # do simple step
                         magnetization[step+1]       = magnetization[step]                                   # copy magnetization 
@@ -1592,18 +1595,16 @@ class RelaxExperiment():
                         position[3*step+3::3] = position[3*step  ]      # do not step anymore
                         position[3*step+4::3] = position[3*step+1]
                         position[3*step+5::3] = position[3*step+2]
-                        print "walker too weak... setting to zero"
+                        #print "walker too weak... setting to zero"
                         break
                     
                     pos_array_for_find[0:3] = position[step*3:step*3+3] # update walker position
-                    #print 'posarray:',pos_array_for_find
                     if find_nearest_C(centers,pos_array_for_find,con_array_for_find) == -1:
                         raise RelaxError(22, "CRITICAL ERROR in continuous relax_rw()!")
-                    
+                                        
                     if con_array_for_find[0] > nonfree_rad_cen+self.dx: # calculate free steps
                         free_steps = int((con_array_for_find[0]-nonfree_rad_cen)/self.dx)
                     
-                    #print 'step, conarray:',step,con_array_for_find
                     relfac = 1-self.dt*self.C*(con_array_for_find[0]**-6+con_array_for_find[1]**-6)
                     if step == 0 and relfac < 0.1:
                         magnetization[1:] = 0                           # set magentization to zero and
@@ -1614,17 +1615,17 @@ class RelaxExperiment():
                         break
                         
                     if relfac < 0.1:    # for debugging only
-                        print con_array_for_find[0]/self.dx, con_array_for_find[1]/self.dx
                         print "ERROR in continuous walk: relfac TOO SMALL:", relfac
+                        print "distances:", con_array_for_find[0]/self.dx, con_array_for_find[1]/self.dx
+                        print "self.dx",self.dx
                     magnetization[step+1] = relfac*magnetization[step]
                     
                     # calculate step
                     if con_array_for_find[1] < 3*self.dx: # if there are two (ore more) centers nearby:
                         step_coords = self.dx*np.sqrt(quenched_diffusion(con_array_for_find[0],self.centers.tau,self.centers.bfield)) # take small sphere instead of ellipse
                     else:   # if not: normal step
-                        #step_coords = self.dx*np.sqrt(quenched_diffusion(con_array_for_find[0],self.centers.tau,self.centers.bfield)) # take small sphere instead of ellipse
-                        step_coords = quenched_step(pos_array_for_find[0:3],pos_array_for_find[3:6],step_array[step*3:step*3+3],self.dx,self.centers.tau,self.centers.bfield)
-                    print "relfac", relfac, 'length of step/dx:',np.linalg.norm(step_coords)/self.dx, "distances to centers",con_array_for_find[0]/self.dx,con_array_for_find[1]/self.dx
+                        step_coords = quenched_step(pos_array_for_find[0:3],pos_array_for_find[3:6],step_array[step*3:step*3+3],self.size,self.dx,self.centers.tau,self.centers.bfield)
+                        # pos_array_for_find[3:6] (coords of first center) might be changed (pulled) after this call
                     position[(step+1)*3:(step+1)*3+3] = position[step*3:step*3+3] + step_coords # step and foldback
                     fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size]))
                                         
@@ -1659,7 +1660,7 @@ class RelaxExperiment():
 
             
             progress.increment()
-            #progress.print_status_line()
+            progress.print_status_line()
 
         
         # apply background relaxation
