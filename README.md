@@ -19,12 +19,15 @@ planned additions
 changelog
 ---------
 
-v6 (nothing tagged yet):
+v6 (nothing tagged yet):  
 additions:
+* free steps now in every walk method, show percentage at end of walk (might be too verbose)
 
-fixes:
+fixes/changes:
+* free steps did add not actual steps of length ~ 1e-10 but of lengths 1
+* added `<cmath>` when compiling `fold_back_C` and `find_nearest_C`
 
-v5:
+v5:  
 additions:
 * continuous quenching
 * omit steps if far from centers (can be part of continuous quenching)
@@ -38,16 +41,15 @@ fixes/changes:
 * when fitting T1 and beta could be negative => modified `strexpdecay()` in `RelaxResult.read_experiment()`
 * make parameter `b` optional input in `pull_center()`, default to `size/2` if not given
 * `RelaxCenters()` now takes `tau` and `bfield` as optional parameters and `RelaxResult` saves it
-* `RelaxExperiment._init_randomwalks()` now takes the parameter about what type of walk. Should be passed down as `**kwargs` from `RelaxExperiment()`.
-* 
+* `RelaxExperiment._init_randomwalks()` now takes the parameter about what type of walk. Should be passed on via `**kwargs` from `RelaxExperiment()`.
 
-v4:
+v4:  
 additions:
 
 * optional dict for `RelaxResult.write_hdf()`
 * switch `do_step` in `RelaxExperiment._run_randomwalks()` to switch stepping on/off after touching a quenching area
 
-v3:
+v3:  
 First commit.
 For changes see file `relaxsim.py`
 

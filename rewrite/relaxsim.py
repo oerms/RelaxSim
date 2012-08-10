@@ -363,7 +363,14 @@ void fold_back_C (int lencoo, double* coords, int constlen, double* consts){
     return;
 }
 """
-fold_back_C = inline_with_numpy(fold_code, arrays = [['lencoo', 'coords'],['constlen','consts']])
+# this compiles the code into a built-in function when importing the module, need "local_headers.h" file
+fileh = open("local_headers.h","w")
+fileh.write("#include <cmath>")
+fileh.close()
+fold_back_C = inline_with_numpy(fold_code, arrays = [['lencoo', 'coords'],['constlen','consts']],local_headers=["local_headers.h"])
+import os
+os.remove("local_headers.h")
+
 
 def fold_back_P(coords, consts):
     """
@@ -452,7 +459,13 @@ double find_nearest_C (int lencen, double* cen, int lenpos, double* pos, int len
     return 0;
 }
 """
-find_nearest_C = inline_with_numpy(find_code, arrays = [['lencen', 'cen'],['lenpos','pos'],['lencon','con']])
+fileh = open("local_headers.h","w")
+fileh.write("#include <math.h>")
+fileh.close()
+find_nearest_C = inline_with_numpy(find_code, arrays = [['lencen', 'cen'],['lenpos','pos'],['lencon','con']],local_headers=["local_headers.h"])
+import os
+os.remove("local_headers.h")
+
 
 def find_nearest_P(cen, pos, con):
     """
@@ -1448,7 +1461,22 @@ class RelaxExperiment():
                 is_caught = False
                 relfac = 1.-self.dt*self.C*dist6**-6
                 #outside any radius
+                
+                nonfree_rad_cen = max(self.b*3,(self.dt*self.C*1e6)**(1/6.))
+                free_steps = 0
+                total_free_steps = 0
+                
+                # start the steps
                 for step in range(self.steps_number):
+                    #print "new loop"
+                    if free_steps > 0:      # do a free steps
+                        position[3*step+3:3*step+6] = position[3*step:3*step+3]+self.dx*step_array[3*step:3*step+3] # do simple step
+                        fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size]))
+                        magnetization[step+1]       = magnetization[step]                                   # copy magnetization 
+                        free_steps -= 1
+                        #print "skipping step..."
+                        continue
+                
                     step3 = step*3 
                     # relaxation
                     magnetization[step+1] = magnetization[step]*relfac
@@ -1471,6 +1499,10 @@ class RelaxExperiment():
                     fold_back_C(tmppos,fold_array)               # fold back _in place_!
                     #print "after foldback step",step, position[step3+3:step3+6]
                     dist6 = accum_dist_C(centers, dist6_array, tmppos)
+                    if dist6**(-1/6.) > nonfree_rad_cen+self.dx: # calculate free steps
+                        free_steps = int((con_array_for_find[0]-nonfree_rad_cen)/self.dx)
+                        total_free_steps += free_steps
+
                     #print "dist_out",dist6
                     if dist6 == -1: # of new step
                         #print "is inside at step",step
@@ -1505,6 +1537,7 @@ class RelaxExperiment():
                     
                 if returnstep == -1:
                     returnstep = step
+                print "percentage of free steps:","{:.0%}".format(total_free_steps/float(self.steps_number))
                 return returnstep
         elif self.walk_type == "stay":
             def relax_rw(position, magnetization, actwalktmp):
@@ -1523,9 +1556,28 @@ class RelaxExperiment():
                 array_for_rate = np.array([self.b,self.size],dtype="d")
                 centers = self.center_positions.flatten()
                 # start the steps
+                                # nonfree radius around centers (walker cannot walk freely if closer than this)
+                nonfree_rad_cen = max(self.b*3,(self.dt*self.C*1e6)**(1/6.))
+                free_steps = 0
+                total_free_steps = 0
+                
+                # start the steps
                 for step in range(self.steps_number):
+                    #print "new loop"
+                    if free_steps > 0:      # do a free steps
+                        position[3*step+3:3*step+6] = position[3*step:3*step+3]+self.dx*step_array[3*step:3*step+3] # do simple step
+                        fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size]))
+                        magnetization[step+1]       = magnetization[step]                                   # copy magnetization 
+                        free_steps -= 1
+                        #print "skipping step..."
+                        continue
+                
                     # accumulate distance**-6
                     dist6 = accum_dist_C(centers, array_for_rate, position[step:step+3])
+                    if dist6**(-1/6.) > nonfree_rad_cen+self.dx: # calculate free steps
+                        free_steps = int((con_array_for_find[0]-nonfree_rad_cen)/self.dx)
+                        total_free_steps += free_steps
+                        
                     if dist6 == -1 :
                         dist6 = 1.-self.dt*self.C*self.b**-6            # calculate relaxation rate
                         position[3*step+3::3] = position[3*step  ]      # do not step anymore
@@ -1539,20 +1591,9 @@ class RelaxExperiment():
                         step3 = step*3
                         step_coords = gen_steps(1)*self.dx
                         position[step3+3:step3+6] = position[step3:step3+3]+step_coords # make the step
-                        #correct for periodic boundaries
-                        if position[step3+3]>self.size:
-                            position[step3+3] -= self.size
-                        if position[step3+3]<0:
-                            position[step3+3] += self.size
-                        if position[step3+4]>self.size:
-                            position[step3+4] -= self.size
-                        if position[step3+4]<0:
-                            position[step3+4] += self.size
-                        if position[step3+5]>self.size:
-                            position[step3+5] -= self.size
-                        if position[step3+5]<0:
-                            position[step3+5] += self.size
+                        fold_back_C(position[step3+3:step3+6],np.array([self.size]))
                 actwalktmp[step+1:] = 0
+                print "percentage of free steps:","{:.0%}".format(total_free_steps/float(self.steps_number))
                 return step       # returns last step
         elif self.walk_type == "continuous":
             np.seterr(invalid='raise')
@@ -1579,12 +1620,14 @@ class RelaxExperiment():
                 # nonfree radius around centers (walker cannot walk freely if closer than this)
                 nonfree_rad_cen = max(self.b*3,(self.dt*self.C*1e6)**(1/6.))
                 free_steps = 0
+                total_free_steps = 0
                 
                 # start the steps
                 for step in range(self.steps_number):
                     #print "new loop"
                     if free_steps > 0:      # do some free steps
-                        position[3*step+3:3*step+6] = position[3*step:3*step+3]+step_array[3*step:3*step+3] # do simple step
+                        position[3*step+3:3*step+6] = position[3*step:3*step+3]+self.dx*step_array[3*step:3*step+3] # do simple step
+                        fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size]))
                         magnetization[step+1]       = magnetization[step]                                   # copy magnetization 
                         free_steps -= 1
                         #print "skipping step..."
@@ -1604,6 +1647,7 @@ class RelaxExperiment():
                                         
                     if con_array_for_find[0] > nonfree_rad_cen+self.dx: # calculate free steps
                         free_steps = int((con_array_for_find[0]-nonfree_rad_cen)/self.dx)
+                        total_free_steps += free_steps
                     
                     relfac = 1-self.dt*self.C*(con_array_for_find[0]**-6+con_array_for_find[1]**-6)
                     if step == 0 and relfac < 0.1:
@@ -1628,7 +1672,7 @@ class RelaxExperiment():
                         # pos_array_for_find[3:6] (coords of first center) might be changed (pulled) after this call
                     position[(step+1)*3:(step+1)*3+3] = position[step*3:step*3+3] + step_coords # step and foldback
                     fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size]))
-                                        
+                print "percentage of free steps: {:.0%}".format(total_free_steps/float(self.steps_number))
                 return step
         else:
             raise RelaxError(21,"Something bad has happened in RelaxExperiment._run_randomwalks(): unknown walk type or fake simulation.")
