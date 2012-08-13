@@ -14,6 +14,8 @@ changes version 0.2 -> 0.3:
     * new function gettau now considers T1e as a function of B and density
     * bradius() (used in getCDb()) now returns b=b/2.3
     * saves start and end time in hdf file
+
+Future Changelog: README of git repository
 """
 
 __author__="Simon Quittek"
@@ -29,6 +31,8 @@ import numpy as np
 import numpy.random as rnd; rnd.seed()
 import scipy.odr as odr # orthogonal data regression
 import matplotlib
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import axes3d, Axes3D 
 #matplotlib.use('Agg')
 #from matplotlib import rc
 #rc('text', usetex=True)
@@ -604,28 +608,26 @@ class RelaxError(Exception):
 
 class RelaxCenters():
     """A class for the "sample": the positions of the paramagnetic centers, and other constants."""
-    def __init__(self, size, density, C, D, b, tau=1e-4, bfield=1, distribution="homogeneous",halo_rad=5e-9,name="",centers=None):
+    def __init__(self, size, C, D, b, density=None,tau=1e-4,bfield=1,distribution="homogeneous",halo_rad=1e-9,name="",var="",centerpositions=None,trackvec=None):
         """constructor
-
+        
         input:
-            density     centers per m^2
-            size        side length in meter
-            C           m^6/s  
-            D           m^2/s
-            b           m
+        density     centers per m^2
+        size        side length in meter
+        C           m^6/s  
+        D           m^2/s
+        b           m
         optional input:
-            tau,bfield  required for later 
-            distribution    "homogenous", "clustered", etc.
-            halo_rad    m
-            name                                string
-            centers     in percent-triples      float numpy array
-                
+        distribution    "homogenous", "clustered", etc. (clustered requires a trackvec)
+        halo_rad m
+        name                                                string
+        var         labels plot for different radius_halos  Int
+        trackvec    iontrackvector                          float numpy array  [2xn]
+        centerpositions specify centers or dont by "None"   float numpy array  [3xn]
         output:
-            self.centers    array of real centers' positions"""
+        self.centers    array of real centers' positions"""
         t_inicen = t.time()
         self.name       = name+"cen"
-        self.density    = density
-        self.mean_dist = (self.density*math.pi*4/3.)**(-1/3.)
         self.size       = size
         self.C          = C
         self.D          = D
@@ -633,35 +635,93 @@ class RelaxCenters():
         self.tau        = tau
         self.bfield     = bfield
         self.distribution= distribution
-        # numbers of centers in center box
-        self.center_number = int(density*size**3)
-        print "Number of centers:",self.center_number
         
-        if centers == None:
-            #TODO cleanup with names and number of centers and such...
+        
+        if centerpositions == None:
+            self.density    = density
+            self.mean_dist = (self.density*math.pi*4/3.)**(-1/3.)
+            self.halo_rad = halo_rad       
+            self.trackveclength = len(trackvec)
+            self.center_number = int(density*size**3)
             if self.distribution == "homogeneous" or self.distribution == 'hom':
                 self.name = self.name + "hom" + "cen"
                 self.center_positions = self.size*rnd.rand(self.center_number,3)
+                print "Number of centers:",self.center_number
             elif self.distribution == 'clustered' or self.distribution == 'clu':
-                x = rnd.normal(self.size/2.,halo_rad,self.center_number)
-                y = rnd.normal(self.size/2.,halo_rad,self.center_number)
-                fold_back_C(x,np.array([self.size]))
-                fold_back_C(y,np.array([self.size]))
-                print size,max(x)
-                print size,min(x)
-                z = rnd.rand(self.center_number)*self.size
+                self.center_numberpertrack = int(density*size**3/self.trackveclength)
+                self.numberofcentersreal = self.center_numberpertrack*self.trackveclength
+                #generates gaussian distributed centers and stacks them into one array
+                x = np.zeros(self.center_number/self.trackveclength)
+                y = np.zeros(self.center_number/self.trackveclength)
+                for i in range(self.trackveclength):
+                    x = x + list(rnd.normal(size*trackvec[i][0],self.halo_rad,self.center_numberpertrack))
+                    x = list(x)
+                    y = y + list(rnd.normal(size*trackvec[i][1],self.halo_rad,self.center_numberpertrack))
+                    y = list(y)
+                z = rnd.rand(self.center_numberpertrack*self.trackveclength)*self.size
+                xx = np.array(x)
+                yy = np.array(y)
+                
+                #check if centers are inside the box
+                fold_back_C(xx,np.array([self.size]))
+                fold_back_C(yy,np.array([self.size]))                        
+                
                 self.center_positions = np.array([x,y,z]).transpose()
+                x_positions = xx.transpose()
+                y_positions = yy.transpose()
+                z_positions = np.array(z).transpose()
+                
+                #plots the center distribution
+                fig3 = plt.figure()
+                ax = fig3.add_subplot(111, projection='3d')
+                
+                ax.plot(x_positions, y_positions, z_positions, 'o')    
+                ax.set_xlabel("{}".format(size))
+                ax.set_ylabel("{}".format(size))
+                ax.set_zlabel("{}".format(size))
+                ax.set_xlim3d(0, size)
+                ax.set_ylim3d(0, size)
+                ax.set_zlim3d(0, size)
+                
+                fig3.savefig('./'+name+','+"{}".format(var)+','+"{}".format(bfield)+',CentersClustered.pdf',format='pdf')
+                #fig3.show()
+                print "Number of centers:",self.numberofcentersreal
             else:
-                print "Distribution not supported yet, generating homogeneous distribution."
+                print "Distribution is not supported" 
         else:
-            if type(centers) is np.ndarray:
-                fold_back_C(centers,np.array([self.size]))
-                self.center_positions = centers*self.size
+            if type(centerpositions) is np.ndarray:
+                self.density = len(centerpositions) / size**3
+                self.numberofcentersreal = len(centerpositions)
+                #fold_back_C(centerpositions,np.array([self.size]))
+                
+                self.center_positions = centerpositions*self.size
+                #plots the center distribution
+                x_positions = np.zeros(len(centerpositions))
+                y_positions = np.zeros(len(centerpositions))
+                z_positions = np.zeros(len(centerpositions))
+                for centernumber in range(len(centerpositions)):
+                    x_positions[centernumber] = centerpositions[centernumber][0]
+                    y_positions[centernumber] = centerpositions[centernumber][1]
+                    z_positions[centernumber] = centerpositions[centernumber][2]
+                    
+                fig2 = plt.figure()
+                ax = fig2.add_subplot(111, projection='3d')
+                
+                ax.plot(x_positions*size, y_positions*size, z_positions*size, 'o')    
+                ax.set_xlabel("{}".format(size))
+                ax.set_ylabel("{}".format(size))
+                ax.set_zlabel("{}".format(size))
+                ax.set_xlim3d(0, size)
+                ax.set_ylim3d(0, size)
+                ax.set_zlim3d(0, size)     
+                
+                fig2.savefig('./'+name+','+"{}".format(var)+','+"{}".format(bfield)+',CentersPositioned.pdf',format='pdf')
+                #fig2.show()
+                print "Number of centers:",len(centerpositions)
             else:
                 raise RelaxError(2,"centers in RelaxCenters._init_() is not a numpy array!")
             
-        print "initiated centers in {0:.0f}s.".format(t_inicen-t.time())
-    
+                                
     def __str__(self,show='all'):
         """return string for printing"""
         return "RelaxCenters instance of name "+str(self.name)+\
@@ -830,6 +890,7 @@ class RelaxResult():
         self.D          = experiment.D
         self.density            = experiment.density
         self.center_positions   = experiment.center_positions
+        self.total_total_free_steps   = experiment.total_total_free_steps
         
         if self.method == "randomwalks":
             self.walkers_number = experiment.walkers_number
@@ -979,6 +1040,7 @@ class RelaxResult():
         inpdata[0] = "See attributes! All values in basic SI units."
         inpdata.attrs["size"]       = self.size
         inpdata.attrs["density"]    = self.density
+        inpdata.attrs["B-field"]    = self.experiment.centers.bfield
         inpdata.attrs["distribution"] = self.experiment.centers.distribution
         inpdata.attrs["mean centers distance"] = (self.density*math.pi*4/3.)**(-1/3.)
         inpdata.attrs["number of centers"] = self.density*self.size**3
@@ -1021,6 +1083,7 @@ class RelaxResult():
         outdata.attrs["stretching beta"] = self.fitbeta
         outdata.attrs["stretching beta error"] = self.fitbetaerr
         outdata.attrs["residual variance"] = self.fitresidualvar
+        outdata.attrs["percentage of free steps"] = self.total_total_free_steps*100/(float(self.experiment.steps_number)*self.experiment.walkers_number )
         
         # saving plots
         # TODO!!
@@ -1134,6 +1197,7 @@ class RelaxExperiment():
         self.C          = self.centers.C
         self.D          = self.centers.D
         self.b          = self.centers.b
+        self.bfield     = self.centers.bfield
         self.dx         = self.b*dxb_ratio
         self.density            = self.centers.density
         self.center_positions   = centers.center_positions
@@ -1348,7 +1412,7 @@ class RelaxExperiment():
         if self.evolution_time < self.dt:
             raise RelaxError(16,"RelaxExperiment.init_randomwalks(): dt > t_evo")
         if 1-self.dt*self.C/self.b**6 < 0.4:
-            print "WARNING: dt and dx were reset to meet stability at radius b!"
+            print "WARNING: dt and dx were modified to meet stability at radius b!"
             self.dt = self.b**6/self.C*(1-0.4)
             self.dx = np.sqrt(6*self.D*self.dt)
         self.steps_number = int(self.evolution_time/self.dt)
@@ -1362,6 +1426,7 @@ class RelaxExperiment():
         
         # plotting some information
         print "initializing walks"
+        print "B-field:            {}".format(self.bfield)
         print "number of steps:    {}".format(self.steps_number)
         print "length of steps:    {:.2} m".format(self.dx)
         print "time step:          {:.2} s".format(self.dt)
@@ -1469,10 +1534,10 @@ class RelaxExperiment():
                 # start the steps
                 for step in range(self.steps_number):
                     #print "new loop"
-                    if free_steps > 0:      # do a free steps
+                    if free_steps > 0: # do a free steps
                         position[3*step+3:3*step+6] = position[3*step:3*step+3]+self.dx*step_array[3*step:3*step+3] # do simple step
                         fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size]))
-                        magnetization[step+1]       = magnetization[step]                                   # copy magnetization 
+                        magnetization[step+1] = magnetization[step] # copy magnetization
                         free_steps -= 1
                         #print "skipping step..."
                         continue
@@ -1502,7 +1567,7 @@ class RelaxExperiment():
                     if dist6**(-1/6.) > nonfree_rad_cen+self.dx: # calculate free steps
                         free_steps = int((con_array_for_find[0]-nonfree_rad_cen)/self.dx)
                         total_free_steps += free_steps
-
+                    
                     #print "dist_out",dist6
                     if dist6 == -1: # of new step
                         #print "is inside at step",step
@@ -1556,18 +1621,17 @@ class RelaxExperiment():
                 array_for_rate = np.array([self.b,self.size],dtype="d")
                 centers = self.center_positions.flatten()
                 # start the steps
-                                # nonfree radius around centers (walker cannot walk freely if closer than this)
+                # nonfree radius around centers (walker cannot walk freely if closer than this)
                 nonfree_rad_cen = max(self.b*3,(self.dt*self.C*1e6)**(1/6.))
                 free_steps = 0
                 total_free_steps = 0
                 
-                # start the steps
                 for step in range(self.steps_number):
                     #print "new loop"
-                    if free_steps > 0:      # do a free steps
+                    if free_steps > 0: # do a free steps
                         position[3*step+3:3*step+6] = position[3*step:3*step+3]+self.dx*step_array[3*step:3*step+3] # do simple step
                         fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size]))
-                        magnetization[step+1]       = magnetization[step]                                   # copy magnetization 
+                        magnetization[step+1] = magnetization[step] # copy magnetization
                         free_steps -= 1
                         #print "skipping step..."
                         continue
@@ -1577,7 +1641,7 @@ class RelaxExperiment():
                     if dist6**(-1/6.) > nonfree_rad_cen+self.dx: # calculate free steps
                         free_steps = int((con_array_for_find[0]-nonfree_rad_cen)/self.dx)
                         total_free_steps += free_steps
-                        
+                    
                     if dist6 == -1 :
                         dist6 = 1.-self.dt*self.C*self.b**-6            # calculate relaxation rate
                         position[3*step+3::3] = position[3*step  ]      # do not step anymore
@@ -1597,6 +1661,8 @@ class RelaxExperiment():
                 return step       # returns last step
         elif self.walk_type == "continuous":
             np.seterr(invalid='raise')
+            self.total_total_free_steps = 0                         #accumulated number of free steps of all walkers
+            self.total_free_steps = 0                               #number of free steps per walker
             def relax_rw(position, magnetization, actwalktmp):
                 """Uniform random walk with relaxating magnetization.
                 The walker cannot walk away from the center.
@@ -1617,18 +1683,20 @@ class RelaxExperiment():
                 # random steps
                 step_array = gen_steps(self.steps_number)
                 
+                self.total_free_steps = 0   
                 # nonfree radius around centers (walker cannot walk freely if closer than this)
                 nonfree_rad_cen = max(self.b*3,(self.dt*self.C*1e6)**(1/6.))
                 free_steps = 0
                 total_free_steps = 0
-                
                 # start the steps
                 for step in range(self.steps_number):
                     #print "new loop"
                     if free_steps > 0:      # do some free steps
                         position[3*step+3:3*step+6] = position[3*step:3*step+3]+self.dx*step_array[3*step:3*step+3] # do simple step
                         fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size]))
-                        magnetization[step+1]       = magnetization[step]                                   # copy magnetization 
+                        magnetization[step+1]       = magnetization[step]                         # copy magnetization 
+                        actwalktmp[step+1] = 1
+                        #print free_steps, position[3*step:3*step+3], self.dx*step_array[3*step:3*step+3]
                         free_steps -= 1
                         #print "skipping step..."
                         continue
@@ -1638,6 +1706,7 @@ class RelaxExperiment():
                         position[3*step+3::3] = position[3*step  ]      # do not step anymore
                         position[3*step+4::3] = position[3*step+1]
                         position[3*step+5::3] = position[3*step+2]
+                        actwalktmp[step:] = 0
                         #print "walker too weak... setting to zero"
                         break
                     
@@ -1647,8 +1716,7 @@ class RelaxExperiment():
                                         
                     if con_array_for_find[0] > nonfree_rad_cen+self.dx: # calculate free steps
                         free_steps = int((con_array_for_find[0]-nonfree_rad_cen)/self.dx)
-                        total_free_steps += free_steps
-                    
+                        self.total_free_steps += free_steps
                     relfac = 1-self.dt*self.C*(con_array_for_find[0]**-6+con_array_for_find[1]**-6)
                     if step == 0 and relfac < 0.1:
                         magnetization[1:] = 0                           # set magentization to zero and
@@ -1672,7 +1740,8 @@ class RelaxExperiment():
                         # pos_array_for_find[3:6] (coords of first center) might be changed (pulled) after this call
                     position[(step+1)*3:(step+1)*3+3] = position[step*3:step*3+3] + step_coords # step and foldback
                     fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size]))
-                print "percentage of free steps: {:.0%}".format(total_free_steps/float(self.steps_number))
+                    actwalktmp[step+1] = 1
+                print "percentage of free steps","{:.0%}".format(self.total_free_steps/float(self.steps_number))     
                 return step
         else:
             raise RelaxError(21,"Something bad has happened in RelaxExperiment._run_randomwalks(): unknown walk type or fake simulation.")
@@ -1687,6 +1756,7 @@ class RelaxExperiment():
             actwalktmp[0] = 1
             #print "doing walk",walk+1
             firstcatch = relax_rw(postmp, magntmp, actwalktmp)
+            self.total_total_free_steps +=  self.total_free_steps
             #print firstcatch
             if plotaxes != None :
                 # plot the walk (only x,y dimensions)
@@ -1701,11 +1771,10 @@ class RelaxExperiment():
                 self.activewalkers, devnull, devnull =\
                         _upd_avg_var( self.activewalkers, self.activewalkersvar, walk, actwalktmp )
             #print self.magn.max(),self.magn.sum(),self.magn
-
-            
+ 
             progress.increment()
             progress.print_status_line()
-
+        print "total percentage of free steps","{:.0%}".format(self.total_total_free_steps/(float(self.steps_number)*self.walkers_number))
         
         # apply background relaxation
         if background != 0:

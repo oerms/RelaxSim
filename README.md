@@ -11,7 +11,6 @@ planned additions
 * clean up variables (is `C` really a local var of Experiment?)
 * clean up error codes in `RelaxError` class
 * make walk class?!
-* time simulations (save start/stop time in hdf)
 * deterministic method for magnetization of single spins (big rate equation) (=> BPP)
 
 * * *
@@ -22,6 +21,8 @@ changelog
 v6 (nothing tagged yet):  
 additions:
 * free steps now in every walk method, show percentage at end of walk (might be too verbose)
+* setting centerpositions now possible
+
 
 fixes/changes:
 * free steps did add not actual steps of length ~ 1e-10 but of lengths 1
@@ -30,7 +31,7 @@ fixes/changes:
 v5:  
 additions:
 * continuous quenching
-* omit steps if far from centers (can be part of continuous quenching)
+* omit steps if far from centers (not only in continuous quenching)
 * implement "fake simulation" for fast execution while debugging: `fake=True` in `RelaxExperiment()`
 * add function `quenched_diffusion()` for continous diffusion quenching with radial dependence
 * add function `quenched_step()` for continous quenched step: use an ellipse of step lengths
