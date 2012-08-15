@@ -658,7 +658,7 @@ class RelaxCenters():
                     x = list(x)
                     y = y + list(rnd.normal(size*trackvec[i][1],self.halo_rad,self.center_numberpertrack))
                     y = list(y)
-                z = rnd.rand(self.center_numberpertrack*self.trackveclength)*self.size
+                z = rnd.rand(self.numberofcentersreal)*self.size
                 xx = np.array(x)
                 yy = np.array(y)
                 
@@ -666,25 +666,7 @@ class RelaxCenters():
                 fold_back_C(xx,np.array([self.size]))
                 fold_back_C(yy,np.array([self.size]))                        
                 
-                self.center_positions = np.array([x,y,z]).transpose()
-                x_positions = xx.transpose()
-                y_positions = yy.transpose()
-                z_positions = np.array(z).transpose()
-                
-                #plots the center distribution
-                fig3 = plt.figure()
-                ax = fig3.add_subplot(111, projection='3d')
-                
-                ax.plot(x_positions, y_positions, z_positions, 'o')    
-                ax.set_xlabel("{}".format(size))
-                ax.set_ylabel("{}".format(size))
-                ax.set_zlabel("{}".format(size))
-                ax.set_xlim3d(0, size)
-                ax.set_ylim3d(0, size)
-                ax.set_zlim3d(0, size)
-                
-                fig3.savefig('./'+name+','+"{}".format(var)+','+"{}".format(bfield)+',CentersClustered.pdf',format='pdf')
-                #fig3.show()
+                self.center_positions = np.array([xx,yy,z]).transpose()
                 print "Number of centers:",self.numberofcentersreal
             else:
                 print "Distribution is not supported" 
@@ -695,28 +677,6 @@ class RelaxCenters():
                 #fold_back_C(centerpositions,np.array([self.size]))
                 
                 self.center_positions = centerpositions*self.size
-                #plots the center distribution
-                x_positions = np.zeros(len(centerpositions))
-                y_positions = np.zeros(len(centerpositions))
-                z_positions = np.zeros(len(centerpositions))
-                for centernumber in range(len(centerpositions)):
-                    x_positions[centernumber] = centerpositions[centernumber][0]
-                    y_positions[centernumber] = centerpositions[centernumber][1]
-                    z_positions[centernumber] = centerpositions[centernumber][2]
-                    
-                fig2 = plt.figure()
-                ax = fig2.add_subplot(111, projection='3d')
-                
-                ax.plot(x_positions*size, y_positions*size, z_positions*size, 'o')    
-                ax.set_xlabel("{}".format(size))
-                ax.set_ylabel("{}".format(size))
-                ax.set_zlabel("{}".format(size))
-                ax.set_xlim3d(0, size)
-                ax.set_ylim3d(0, size)
-                ax.set_zlim3d(0, size)     
-                
-                fig2.savefig('./'+name+','+"{}".format(var)+','+"{}".format(bfield)+',CentersPositioned.pdf',format='pdf')
-                #fig2.show()
                 print "Number of centers:",len(centerpositions)
             else:
                 raise RelaxError(2,"centers in RelaxCenters._init_() is not a numpy array!")
@@ -1152,7 +1112,35 @@ class RelaxResult():
         # loc: 0: optimal, 3: lower left; legendsize determines size (standard 20)
         axes.legend(loc=3,prop=dict(size=legendsize))
         return figure,axes
+        
+    def plot_data3d(self,label,showplot="yes",plottitle='',legendsize=17,**kwargs):           
+        #plots the center distribution
+        length = len(self.experiment.centers.center_positions)
+        x_positions = np.zeros(length)
+        y_positions = np.zeros(length)
+        z_positions = np.zeros(length)
+        for centernumber in range(length):
+            x_positions[centernumber] = self.experiment.centers.center_positions[centernumber][0]
+            y_positions[centernumber] = self.experiment.centers.center_positions[centernumber][1]
+            z_positions[centernumber] = self.experiment.centers.center_positions[centernumber][2]
             
+        fig2 = plt.figure()
+        ax = fig2.add_subplot(111, projection='3d')
+        
+        ax.plot(x_positions, y_positions, z_positions, 'o')    
+        ax.set_xlabel("{}".format(self.size))
+        ax.set_ylabel("{}".format(self.size))
+        ax.set_zlabel("{}".format(self.size))
+        ax.set_xlim3d(0, self.size)
+        ax.set_ylim3d(0, self.size)
+        ax.set_zlim3d(0, self.size)     
+        ax.set_title(plottitle)
+        # loc: 0: optimal, 3: lower left; legendsize determines size (standard 20)
+        ax.legend(loc=3,prop=dict(size=legendsize))
+        
+        fig2.savefig('./'+label+',Centers.pdf',format='pdf')
+        if showplot=="yes":
+            fig2.show()
     def __str__(self):
         """return string representation of RelaxResult instance."""
         return self.name+" has self.centers information:\n"+self.centers.__str__()
