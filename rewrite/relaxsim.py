@@ -608,11 +608,11 @@ class RelaxError(Exception):
 
 class RelaxCenters():
     """A class for the "sample": the positions of the paramagnetic centers, and other constants."""
-    def __init__(self, size, C, D, b, density=None,tau=1e-4,bfield=1,distribution="homogeneous",halo_rad=1e-9,name="",var="",centerpositions=None,trackvec=None):
+    def __init__(self, size, C, D, b, density=None, tau=1e-4,bfield=1,distribution="homogeneous",halo_rad=1e-9,name="",var="",centerpositions=None,trackvec=None):
         """constructor
         
         input:
-        density     centers per m^2
+        density     centers per m^3
         size        side length in meter
         C           m^6/s  
         D           m^2/s
@@ -641,13 +641,14 @@ class RelaxCenters():
             self.density    = density
             self.mean_dist = (self.density*math.pi*4/3.)**(-1/3.)
             self.halo_rad = halo_rad       
-            self.trackveclength = len(trackvec)
             self.center_number = int(density*size**3)
             if self.distribution == "homogeneous" or self.distribution == 'hom':
-                self.name = self.name + "hom" + "cen"
+                #self.name = self.name + "hom"
                 self.center_positions = self.size*rnd.rand(self.center_number,3)
+                self.numberofcentersreal = self.center_number
                 print "Number of centers:",self.center_number
             elif self.distribution == 'clustered' or self.distribution == 'clu':
+                self.trackveclength = len(trackvec)
                 self.center_numberpertrack = int(density*size**3/self.trackveclength)
                 self.numberofcentersreal = self.center_numberpertrack*self.trackveclength
                 #generates gaussian distributed centers and stacks them into one array
@@ -850,10 +851,10 @@ class RelaxResult():
         self.D          = experiment.D
         self.density            = experiment.density
         self.center_positions   = experiment.center_positions
-        self.total_total_free_steps   = experiment.total_total_free_steps
         
         if self.method == "randomwalks":
             self.walkers_number = experiment.walkers_number
+            self.total_total_free_steps   = experiment.total_total_free_steps
         
         self.logscale = logscale
             
@@ -1163,6 +1164,7 @@ class RelaxExperiment():
             
             deterministic:
                 dt          set a timestep manually
+                continuous  True/False, set continuous/sudden quench of diffusion
             randomwalks:
                 walk_type   step: walk away from center again, after hitting hard quenching radius
                             stay: stay at first contact with hard quenching radius
@@ -1232,11 +1234,13 @@ class RelaxExperiment():
             raise RelaxError(12,"Method of experiment not known.")
         self.finished = True
         
-    def _init_deterministic(self, dt=0):
+    def _init_deterministic(self, dt=0, continuous=False):
         """Test values and creating matrices from it.
 
         input:
             dt:         evolution timestep in seconds
+            continuous  True/False, set continuous/sudden quench of diffusion
+
         """
         t_detini_b = t.time()
 
@@ -1287,13 +1291,38 @@ class RelaxExperiment():
         self.M_vector = np.ones(self.lattice_points**3)
         self.Meqzero = 0   # counter of zero entries of M
         
+        # fill D,C,B vectors
         if self.fake:
             self.C_vector[:] = 0
             self.D_vector[:] = 1
             self.M_vector[:] = 1
             self.Meqzero = self.lattice_points**3
+        elif continuous:
+            # continuous quenching, quench directly determined by overlap
+            pos_array_for_find = np.array([0,0,0,0,0,0,0,0,0],dtype="d")        # the two arrays for find
+            con_array_for_find = np.array([0,0,self.lattice_points],dtype='d')
+            progress = Progress(self.lattice_points)
+            for j in range(self.lattice_points):
+                pos_array_for_find[0] = j
+                for l in range(self.lattice_points):
+                    pos_array_for_find[1] = l
+                    for m in range(self.lattice_points):
+                        pos_array_for_find[2] = m
+                        if find_nearest_C(self.centers_l,pos_array_for_find,con_array_for_find) == -1:
+                            raise RelaxError(22, "CRITICAL ERROR in continuous deterministic!")
+                        ind_jlm = ti(j,l,m) # current index, no need to calculate every time
+                        self.C_vector[ind_jlm] = self.dt*self.C*(con_array_for_find[0]**-6+con_array_for_find[1]**-6)*self.dx**-6
+                        if self.C_vector[ind_jlm] > 0.5 :
+                            # choose 0.5 as critical factor when linear approximation of exponential breaks down
+                            self.C_vector[ind_jlm] = 0.5
+                        self.D_vector[ind_jlm] = quenched_diffusion(con_array_for_find[0]*self.dx,self.centers.tau,self.centers.bfield)
+                            
+                progress.increment()
+                progress.print_status_line()
+            # amend diffusion vector by constants
+            self.D_vector *= self.D*self.dt*self.dx**-2
         else:
-            # fill D,C,B vectors
+            # usual sudden quenching
             array_for_rate = np.array([self.b_l,self.lattice_points,0,0,0],dtype="d") # saving time making the array before loop
             progress = Progress(self.lattice_points)
             for j in range(self.lattice_points):
@@ -1312,7 +1341,7 @@ class RelaxExperiment():
             # amend vectors by constants
             self.D_vector *= self.D*self.dt*self.dx**-2
             self.C_vector *= self.C*self.dt*self.dx**-6
-
+        
         # RHS matrix B, according to p 15, eq (IX)
         print "Creating matrix B."
         import scipy.sparse as spsp
@@ -1553,7 +1582,7 @@ class RelaxExperiment():
                     #print "after foldback step",step, position[step3+3:step3+6]
                     dist6 = accum_dist_C(centers, dist6_array, tmppos)
                     if dist6**(-1/6.) > nonfree_rad_cen+self.dx: # calculate free steps
-                        free_steps = int((con_array_for_find[0]-nonfree_rad_cen)/self.dx)
+                        free_steps = int((dist6**(-1/6.)-nonfree_rad_cen)/self.dx)
                         total_free_steps += free_steps
                     
                     #print "dist_out",dist6
@@ -1627,7 +1656,7 @@ class RelaxExperiment():
                     # accumulate distance**-6
                     dist6 = accum_dist_C(centers, array_for_rate, position[step:step+3])
                     if dist6**(-1/6.) > nonfree_rad_cen+self.dx: # calculate free steps
-                        free_steps = int((con_array_for_find[0]-nonfree_rad_cen)/self.dx)
+                        free_steps = int((dist6**(-1/6.)-nonfree_rad_cen)/self.dx)
                         total_free_steps += free_steps
                     
                     if dist6 == -1 :

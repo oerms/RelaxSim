@@ -22,11 +22,16 @@ v6 (nothing tagged yet):
 additions:
 * free steps now in every walk method, show percentage at end of walk (might be too verbose)
 * setting centerpositions now possible
+* continuous quenching in deterministic method
 
 
 fixes/changes:
 * free steps did add not actual steps of length ~ 1e-10 but of lengths 1
 * added `<cmath>` when compiling `fold_back_C` and `find_nearest_C`
+* fixed a bug in `stay` and `step` walks resulting from copying omitting code from `contiuous`
+* fixed a bug with `total_total_freesteps` and deterministic experiments
+* `density` is now optional argument to `RelaxCenters()`
+
 
 v5:  
 additions:

@@ -53,9 +53,10 @@ for bf in range(len(blogvec)):
         "\n"+"Walkers: "+"{}".format(numberwalkers)#+" rad$^{-3}$"
         
         result.plot_data(activewalkers=True,ploterror=False,axes=ax,label=plotlabel,logx=True)
-        fig.savefig('./'+name+','+'bfield:'+"{}".format(bfield)+','+'i:'+"{}".format(i)+',magn.pdf',format='pdf')
+        fig.savefig('./'+name+','+'bfield:'+"{:.3}".format(bfield)+','+'i:'+"{:.3}".format(i)+',magn.pdf',format='pdf')
 
-        result.plot_data3d(label=name+','+'bfield:'+"{}".format(bfield)+','+'i:'+"{}".format(i),showplot="no",plottitle='',legendsize=17)
+        result.plot_data3d(label=name+','+'bfield:'+"{:.3}".format(bfield)+','+'i:'+"{:.3}".format(i),showplot="no",plottitle='',legendsize=17)
     
         
         i = i + step
+
