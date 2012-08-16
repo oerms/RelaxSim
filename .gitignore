@@ -1,2 +1,7 @@
 # ignore tests
 rewrite/test*/
+
+# all hdf and pdf files
+*.pdf
+*.hdf
+*.hd5
