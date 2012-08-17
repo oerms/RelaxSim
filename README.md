@@ -23,7 +23,8 @@ additions:
 * continuous quenching in deterministic method
 * free steps now in every walk method, show percentage at end of walk (might be too verbose)
 * setting centerpositions now possible
-
+* correct `free_steps` if there are too many free steps for the walker
+* generally rework free steps at `stay` method
 
 fixes/changes:
 * free steps did add not actual steps of length ~ 1e-10 but of lengths 1
@@ -31,7 +32,6 @@ fixes/changes:
 * fixed a bug in `stay` and `step` walks resulting from copying omitting code from `contiuous`
 * fixed a bug with `total_total_freesteps` and deterministic experiments
 * `density` is now optional argument to `RelaxCenters()`
-
 
 v5:  
 additions:
