@@ -608,11 +608,11 @@ class RelaxError(Exception):
 
 class RelaxCenters():
     """A class for the "sample": the positions of the paramagnetic centers, and other constants."""
-    def __init__(self, size, C, D, b, density=None, tau=1e-4,bfield=1,distribution="homogeneous",halo_rad=1e-9,name="",var="",centerpositions=None,trackvec=None):
+    def __init__(self, size, C, D, b, density=None,tau=1e-4,bfield=1,distribution="homogeneous",halo_rad=1e-9,name="",var="",centerpositions=None,trackvec=None):
         """constructor
         
         input:
-        density     centers per m^3
+        density     centers per m^2
         size        side length in meter
         C           m^6/s  
         D           m^2/s
@@ -641,14 +641,13 @@ class RelaxCenters():
             self.density    = density
             self.mean_dist = (self.density*math.pi*4/3.)**(-1/3.)
             self.halo_rad = halo_rad       
+            self.trackveclength = len(trackvec)
             self.center_number = int(density*size**3)
             if self.distribution == "homogeneous" or self.distribution == 'hom':
-                #self.name = self.name + "hom"
+                self.name = self.name + "hom" + "cen"
                 self.center_positions = self.size*rnd.rand(self.center_number,3)
-                self.numberofcentersreal = self.center_number
                 print "Number of centers:",self.center_number
             elif self.distribution == 'clustered' or self.distribution == 'clu':
-                self.trackveclength = len(trackvec)
                 self.center_numberpertrack = int(density*size**3/self.trackveclength)
                 self.numberofcentersreal = self.center_numberpertrack*self.trackveclength
                 #generates gaussian distributed centers and stacks them into one array
@@ -659,7 +658,7 @@ class RelaxCenters():
                     x = list(x)
                     y = y + list(rnd.normal(size*trackvec[i][1],self.halo_rad,self.center_numberpertrack))
                     y = list(y)
-                z = rnd.rand(self.numberofcentersreal)*self.size
+                z = rnd.rand(self.center_numberpertrack*self.trackveclength)*self.size
                 xx = np.array(x)
                 yy = np.array(y)
                 
@@ -667,7 +666,25 @@ class RelaxCenters():
                 fold_back_C(xx,np.array([self.size]))
                 fold_back_C(yy,np.array([self.size]))                        
                 
-                self.center_positions = np.array([xx,yy,z]).transpose()
+                self.center_positions = np.array([x,y,z]).transpose()
+                x_positions = xx.transpose()
+                y_positions = yy.transpose()
+                z_positions = np.array(z).transpose()
+                
+                #plots the center distribution
+                fig3 = plt.figure()
+                ax = fig3.add_subplot(111, projection='3d')
+                
+                ax.plot(x_positions, y_positions, z_positions, 'o')    
+                ax.set_xlabel("{}".format(size))
+                ax.set_ylabel("{}".format(size))
+                ax.set_zlabel("{}".format(size))
+                ax.set_xlim3d(0, size)
+                ax.set_ylim3d(0, size)
+                ax.set_zlim3d(0, size)
+                
+                fig3.savefig('./'+name+','+"{}".format(var)+','+"{}".format(bfield)+',CentersClustered.pdf',format='pdf')
+                #fig3.show()
                 print "Number of centers:",self.numberofcentersreal
             else:
                 print "Distribution is not supported" 
@@ -678,6 +695,28 @@ class RelaxCenters():
                 #fold_back_C(centerpositions,np.array([self.size]))
                 
                 self.center_positions = centerpositions*self.size
+                #plots the center distribution
+                x_positions = np.zeros(len(centerpositions))
+                y_positions = np.zeros(len(centerpositions))
+                z_positions = np.zeros(len(centerpositions))
+                for centernumber in range(len(centerpositions)):
+                    x_positions[centernumber] = centerpositions[centernumber][0]
+                    y_positions[centernumber] = centerpositions[centernumber][1]
+                    z_positions[centernumber] = centerpositions[centernumber][2]
+                    
+                fig2 = plt.figure()
+                ax = fig2.add_subplot(111, projection='3d')
+                
+                ax.plot(x_positions*size, y_positions*size, z_positions*size, 'o')    
+                ax.set_xlabel("{}".format(size))
+                ax.set_ylabel("{}".format(size))
+                ax.set_zlabel("{}".format(size))
+                ax.set_xlim3d(0, size)
+                ax.set_ylim3d(0, size)
+                ax.set_zlim3d(0, size)     
+                
+                fig2.savefig('./'+name+','+"{}".format(var)+','+"{}".format(bfield)+',CentersPositioned.pdf',format='pdf')
+                #fig2.show()
                 print "Number of centers:",len(centerpositions)
             else:
                 raise RelaxError(2,"centers in RelaxCenters._init_() is not a numpy array!")
@@ -851,10 +890,10 @@ class RelaxResult():
         self.D          = experiment.D
         self.density            = experiment.density
         self.center_positions   = experiment.center_positions
+        self.total_total_free_steps   = experiment.total_total_free_steps
         
         if self.method == "randomwalks":
             self.walkers_number = experiment.walkers_number
-            self.total_total_free_steps   = experiment.total_total_free_steps
         
         self.logscale = logscale
             
@@ -1113,35 +1152,7 @@ class RelaxResult():
         # loc: 0: optimal, 3: lower left; legendsize determines size (standard 20)
         axes.legend(loc=3,prop=dict(size=legendsize))
         return figure,axes
-        
-    def plot_data3d(self,label,showplot="yes",plottitle='',legendsize=17,**kwargs):           
-        #plots the center distribution
-        length = len(self.experiment.centers.center_positions)
-        x_positions = np.zeros(length)
-        y_positions = np.zeros(length)
-        z_positions = np.zeros(length)
-        for centernumber in range(length):
-            x_positions[centernumber] = self.experiment.centers.center_positions[centernumber][0]
-            y_positions[centernumber] = self.experiment.centers.center_positions[centernumber][1]
-            z_positions[centernumber] = self.experiment.centers.center_positions[centernumber][2]
             
-        fig2 = plt.figure()
-        ax = fig2.add_subplot(111, projection='3d')
-        
-        ax.plot(x_positions, y_positions, z_positions, 'o')    
-        ax.set_xlabel("{}".format(self.size))
-        ax.set_ylabel("{}".format(self.size))
-        ax.set_zlabel("{}".format(self.size))
-        ax.set_xlim3d(0, self.size)
-        ax.set_ylim3d(0, self.size)
-        ax.set_zlim3d(0, self.size)     
-        ax.set_title(plottitle)
-        # loc: 0: optimal, 3: lower left; legendsize determines size (standard 20)
-        ax.legend(loc=3,prop=dict(size=legendsize))
-        
-        fig2.savefig('./'+label+',Centers.pdf',format='pdf')
-        if showplot=="yes":
-            fig2.show()
     def __str__(self):
         """return string representation of RelaxResult instance."""
         return self.name+" has self.centers information:\n"+self.centers.__str__()
@@ -1164,7 +1175,6 @@ class RelaxExperiment():
             
             deterministic:
                 dt          set a timestep manually
-                continuous  True/False, set continuous/sudden quench of diffusion
             randomwalks:
                 walk_type   step: walk away from center again, after hitting hard quenching radius
                             stay: stay at first contact with hard quenching radius
@@ -1234,13 +1244,11 @@ class RelaxExperiment():
             raise RelaxError(12,"Method of experiment not known.")
         self.finished = True
         
-    def _init_deterministic(self, dt=0, continuous=False):
+    def _init_deterministic(self, dt=0):
         """Test values and creating matrices from it.
 
         input:
             dt:         evolution timestep in seconds
-            continuous  True/False, set continuous/sudden quench of diffusion
-
         """
         t_detini_b = t.time()
 
@@ -1291,38 +1299,13 @@ class RelaxExperiment():
         self.M_vector = np.ones(self.lattice_points**3)
         self.Meqzero = 0   # counter of zero entries of M
         
-        # fill D,C,B vectors
         if self.fake:
             self.C_vector[:] = 0
             self.D_vector[:] = 1
             self.M_vector[:] = 1
             self.Meqzero = self.lattice_points**3
-        elif continuous:
-            # continuous quenching, quench directly determined by overlap
-            pos_array_for_find = np.array([0,0,0,0,0,0,0,0,0],dtype="d")        # the two arrays for find
-            con_array_for_find = np.array([0,0,self.lattice_points],dtype='d')
-            progress = Progress(self.lattice_points)
-            for j in range(self.lattice_points):
-                pos_array_for_find[0] = j
-                for l in range(self.lattice_points):
-                    pos_array_for_find[1] = l
-                    for m in range(self.lattice_points):
-                        pos_array_for_find[2] = m
-                        if find_nearest_C(self.centers_l,pos_array_for_find,con_array_for_find) == -1:
-                            raise RelaxError(22, "CRITICAL ERROR in continuous deterministic!")
-                        ind_jlm = ti(j,l,m) # current index, no need to calculate every time
-                        self.C_vector[ind_jlm] = self.dt*self.C*(con_array_for_find[0]**-6+con_array_for_find[1]**-6)*self.dx**-6
-                        if self.C_vector[ind_jlm] > 0.5 :
-                            # choose 0.5 as critical factor when linear approximation of exponential breaks down
-                            self.C_vector[ind_jlm] = 0.5
-                        self.D_vector[ind_jlm] = quenched_diffusion(con_array_for_find[0]*self.dx,self.centers.tau,self.centers.bfield)
-                            
-                progress.increment()
-                progress.print_status_line()
-            # amend diffusion vector by constants
-            self.D_vector *= self.D*self.dt*self.dx**-2
         else:
-            # usual sudden quenching
+            # fill D,C,B vectors
             array_for_rate = np.array([self.b_l,self.lattice_points,0,0,0],dtype="d") # saving time making the array before loop
             progress = Progress(self.lattice_points)
             for j in range(self.lattice_points):
@@ -1341,7 +1324,7 @@ class RelaxExperiment():
             # amend vectors by constants
             self.D_vector *= self.D*self.dt*self.dx**-2
             self.C_vector *= self.C*self.dt*self.dx**-6
-        
+
         # RHS matrix B, according to p 15, eq (IX)
         print "Creating matrix B."
         import scipy.sparse as spsp
@@ -1582,7 +1565,7 @@ class RelaxExperiment():
                     #print "after foldback step",step, position[step3+3:step3+6]
                     dist6 = accum_dist_C(centers, dist6_array, tmppos)
                     if dist6**(-1/6.) > nonfree_rad_cen+self.dx: # calculate free steps
-                        free_steps = int((dist6**(-1/6.)-nonfree_rad_cen)/self.dx)
+                        free_steps = int((con_array_for_find[0]-nonfree_rad_cen)/self.dx)
                         total_free_steps += free_steps
                     
                     #print "dist_out",dist6
@@ -1646,8 +1629,7 @@ class RelaxExperiment():
                 for step in range(self.steps_number):
                     #print "new loop"
                     if free_steps > 0: # do a free steps
-                        step_coords = gen_steps(1)*self.dx
-                        position[3*step+3:3*step+6] = position[3*step:3*step+3]+self.dx*step_coords # do simple step
+                        position[3*step+3:3*step+6] = position[3*step:3*step+3]+self.dx*step_array[3*step:3*step+3] # do simple step
                         fold_back_C(position[(step+1)*3:(step+1)*3+3],np.array([self.size]))
                         magnetization[step+1] = magnetization[step] # copy magnetization
                         free_steps -= 1
@@ -1657,7 +1639,7 @@ class RelaxExperiment():
                     # accumulate distance**-6
                     dist6 = accum_dist_C(centers, array_for_rate, position[step:step+3])
                     if dist6**(-1/6.) > nonfree_rad_cen+self.dx: # calculate free steps
-                        free_steps = int((dist6**(-1/6.)-nonfree_rad_cen)/self.dx)
+                        free_steps = int((con_array_for_find[0]-nonfree_rad_cen)/self.dx)
                         total_free_steps += free_steps
                     
                     if dist6 == -1 :

@@ -1,5 +1,5 @@
 # ignore tests
-rewrite/test*/
+rewrite/test*
 
 # all hdf and pdf files
 *.pdf

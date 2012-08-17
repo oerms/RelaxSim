@@ -20,9 +20,9 @@ changelog
 
 v6 (nothing tagged yet):  
 additions:
+* continuous quenching in deterministic method
 * free steps now in every walk method, show percentage at end of walk (might be too verbose)
 * setting centerpositions now possible
-* continuous quenching in deterministic method
 
 
 fixes/changes:
