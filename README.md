@@ -11,11 +11,12 @@ planned additions
 -----------------
 (sorted by urgency)
 
-* do not remember every step => save RAM (in fake simulation as well!)
-* clean up variables (is `C` really a local var of Experiment?)
-* clean up error codes in `RelaxError` class
-* make walk class?!
 * deterministic method for magnetization of single spins (big rate equation) (=> BPP)
+* do not remember every step => save RAM (in fake simulation as well!)
+* clean up variables (e.g. is `C` really a local var of Experiment?)
+* clean up error codes in `RelaxError` class
+* correct `free_steps` if there are too many free steps for the walker
+* generally rework free steps at `stay` method
 
 * * *
 
@@ -26,16 +27,12 @@ v6 (nothing tagged yet):
 additions:
 * continuous quenching in deterministic method
 * free steps now in every walk method, show percentage at end of walk (might be too verbose)
-* setting centerpositions now possible
-* correct `free_steps` if there are too many free steps for the walker
-* generally rework free steps at `stay` method
+* setting centerpositions manually now possible
 
 fixes/changes:
 * free steps did add not actual steps of length ~ 1e-10 but of lengths 1
 * added `<cmath>` when compiling `fold_back_C` and `find_nearest_C`
-* fixed a bug in `stay` and `step` walks resulting from copying omitting code from `contiuous`
-* fixed a bug with `total_total_freesteps` and deterministic experiments
-* `density` is now optional argument to `RelaxCenters()`
+* `density` is now optional argument to `RelaxCenters()` (not neccessary when setting centers manually)
 * fixed a bug in `stay` method: `array_for_rate` had wrong dimension, which led to segfaults
 
 v5:  
