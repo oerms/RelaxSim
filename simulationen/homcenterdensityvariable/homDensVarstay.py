@@ -10,18 +10,21 @@ name = "stay_homogeneous"#+"{}".format(i)
 denssteps = 8
 densvec = log_range(1e23,1e26,denssteps)
 
-
-numberwalkers = 50
+numberwalkers = 200
 bfield = 1e-2  			# 0,125 < B < 6
 tau = 1e-4				#
 evo_time = 1e2
 size = 5e-8
 
+T1dens = []
+
 for dens in range(len(densvec)):
     density = densvec[dens]         # NumberofCenters / size^3 , 10^22 < density < 10^26 
 
     C,D,b = getCDb(bfield,tau)
-
+    
+    thisname = name+','+'dens'+"{:.4}".format(density)+',magn.pdf'
+    
     ceninst = RelaxCenters(size,C,D,b,density, tau=tau, bfield=bfield,distribution="hom",halo_rad=None,name=name,\
     centerpositions=None,trackvec = None)
 
@@ -41,3 +44,10 @@ for dens in range(len(densvec)):
     fig.savefig('./'+name+','+'dens'+"{:.4}".format(density)+',magn.pdf',format='pdf')
 
     result.plot_data3d(label=name+','+'dens:'+"{:.4}".format(density),showplot="no",plottitle='',legendsize=17) 
+
+    T1dens.append([result.density, result.fitT1, result.fitT1err, result.fitbeta, result.fitbetaerr])
+    
+T1dens = np.array(T1dens)
+
+np.savetxt("dens,T1,T1err,beta,betaerr.txt",T1dens)
+

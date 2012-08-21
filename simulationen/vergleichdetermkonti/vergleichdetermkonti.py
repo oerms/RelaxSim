@@ -8,10 +8,10 @@ rc('text.latex',preamble='\usepackage[charter]{mathdesign}\n\usepackage{phystex_
 rc('font',**{'family':'serif','serif':['Charter'], 'size':16})
 rc('mathtext', **{'it':'Charter', 'fontset':'custom'})
 
-import relaxsimv1
-from relaxsimv1 import *
-reload(relaxsimv1)
-from relaxsimv1 import *
+import relaxsim
+from relaxsim import *
+reload(relaxsim)
+from relaxsim import *
 
 # RENAME ME PLEASE!!
 name = "compare_"
@@ -33,24 +33,22 @@ for bfield in np.array([1e-3,1e-2,1e-1,1e0,1e1]):
     #bfield = 1.2
     print 'field is now:', bfield, " T"
     
-    #tau = relaxsimv1.gettau(density,bfield)
-    C,D,b = relaxsimv1.getCDb(bfield,tau)
+    C,D,b = relaxsim.getCDb(bfield,tau)
 
-    ceninst = RelaxCenters(size,density,C,D,b,name=name+"{:.2}".format(density))
+    ceninst = RelaxCenters(size,C,D,b,density,name=name+"{:.2}".format(density))
     print ceninst
-    #fig,axes = ceninst.plot(fname="centerplot")
-
-    detexp = RelaxExperiment(ceninst,evo_time,method="deterministic")
-    detexp.run_experiment()
-    detresult = RelaxResult(experiment=detexp,logscale=True)
-    detresult.plot_data(axes=ax,label="determ "+"$B_0 = \SI{"+"{:.2e}".format(bfield)+"}{T}$",logx=True)
-    filename = detresult.write_hdf()
 
     rwexp = RelaxExperiment(ceninst,evo_time,method="randomwalks",walk_type='continuous')
     rwexp.run_experiment(walks=walks)
     rwresult = RelaxResult(experiment=rwexp,logscale=True)
     rwresult.plot_data(axes=ax,ploterror=True,label="random "+"$B_0 = \SI{"+"{:.2e}".format(bfield)+"}{T}$",logx=True)
     filename = rwresult.write_hdf()
+    
+    detexp = RelaxExperiment(ceninst,evo_time,method="deterministic")
+    detexp.run_experiment()
+    detresult = RelaxResult(experiment=detexp,logscale=True)
+    detresult.plot_data(axes=ax,label="determ "+"$B_0 = \SI{"+"{:.2e}".format(bfield)+"}{T}$",logx=True)
+    filename = detresult.write_hdf()
 
     T1densdet.append([detresult.density, detresult.fitT1, detresult.fitT1err, detresult.fitbeta, detresult.fitbetaerr])
     T1densrw.append([ rwresult.density,  rwresult.fitT1,  rwresult.fitT1err,  rwresult.fitbeta,  rwresult.fitbetaerr])
