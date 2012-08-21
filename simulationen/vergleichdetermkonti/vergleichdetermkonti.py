@@ -16,7 +16,7 @@ from relaxsimv1 import *
 # RENAME ME PLEASE!!
 name = "compare_"
 
-size = 2.5e-8
+size = 3e-8
 evo_time = 1e+2
 walks = 200
 tau=1e-4

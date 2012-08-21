@@ -1,7 +1,11 @@
 RelaxSim
 ========
 
-Nuclear Magnetization Relaxation Simulation by paramagnetic impurities in LiF and other Fluorine Systems
+Nuclear Magnetization Relaxation Simulation by paramagnetic impurities in LiF and other Fluorine Systems.
+
+The following changelog only lists changes in the module.
+Additionally there are files for simulating certain situations.
+The resulting `.hdf` and `.pdf` files are not part of the git repository.
 
 planned additions
 -----------------
@@ -32,6 +36,7 @@ fixes/changes:
 * fixed a bug in `stay` and `step` walks resulting from copying omitting code from `contiuous`
 * fixed a bug with `total_total_freesteps` and deterministic experiments
 * `density` is now optional argument to `RelaxCenters()`
+* fixed a bug in `stay` method: `array_for_rate` had wrong dimension, which led to segfaults
 
 v5:  
 additions:

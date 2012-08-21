@@ -5,7 +5,7 @@ from relaxsim import  *
 reload(relaxsim)
 from relaxsim import  *
 
-name = "stayhomogeneous"#+"{}".format(i)
+name = "stay_homogeneous"#+"{}".format(i)
 
 denssteps = 8
 densvec = log_range(1e23,1e26,denssteps)
@@ -37,7 +37,7 @@ for dens in range(len(densvec)):
     "\n"+"density: "+"{:.2}".format(float(ceninst.density))+\
     "\n"+"Walkers: "+"{}".format(numberwalkers)
     
-    result.plot_data(activewalkers=True,ploterror=False,axes=ax,label=plotlabel,logx=True)
-    fig.savefig('./'+name+','+'dens:'+"{:.4}".format(density)+',magn.pdf',format='pdf')
+    result.plot_data(activewalkers=True,ploterror=True,axes=ax,label=plotlabel,logx=True)
+    fig.savefig('./'+name+','+'dens'+"{:.4}".format(density)+',magn.pdf',format='pdf')
 
     result.plot_data3d(label=name+','+'dens:'+"{:.4}".format(density),showplot="no",plottitle='',legendsize=17) 
