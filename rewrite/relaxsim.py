@@ -33,7 +33,7 @@ import scipy.odr as odr # orthogonal data regression
 import matplotlib
 #import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d, Axes3D 
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 #from matplotlib import rc
 #rc('text', usetex=True)
 #rc('text.latex',preamble='\usepackage[charter]{mathdesign}')
@@ -1099,7 +1099,7 @@ class RelaxResult():
         if activewalkers and self.activewalkers!=None:
             plactwalk = axes.plot(self.timearray,self.activewalkers,'-',color=color,**kwargs)
         if plotfit:
-            plfit = axes.plot(self.timearray,self.fitarray,'--',label=label,color=color)
+            plfit = axes.plot(self.timearray,self.fitarray,'-.',label=label,color=color)
         # adjust plot options
         if logx == True or self.logscale == True:
             axes.set_xscale('log')
@@ -1114,7 +1114,7 @@ class RelaxResult():
         axes.legend(loc=3,prop=dict(size=legendsize))
         return figure,axes
         
-    def plot_data3d(self,label,showplot="yes",plottitle='',legendsize=17,**kwargs):           
+    def plot_data3d(self,label,showplot=True,plottitle='',legendsize=17,**kwargs):           
         #plots the center distribution
         length = len(self.experiment.centers.center_positions)
         x_positions = np.zeros(length)
@@ -1134,14 +1134,15 @@ class RelaxResult():
         ax.set_zlabel("{}".format(self.size))
         ax.set_xlim3d(0, self.size)
         ax.set_ylim3d(0, self.size)
-        ax.set_zlim3d(0, self.size)     
+        ax.set_zlim3d(0, self.size)
         ax.set_title(plottitle)
         # loc: 0: optimal, 3: lower left; legendsize determines size (standard 20)
         ax.legend(loc=3,prop=dict(size=legendsize))
         
         fig2.savefig('./'+label+',Centers.pdf',format='pdf')
-        if showplot=="yes":
+        if showplot:
             fig2.show()
+            
     def __str__(self):
         """return string representation of RelaxResult instance."""
         return self.name+" has self.centers information:\n"+self.centers.__str__()
@@ -1313,7 +1314,7 @@ class RelaxExperiment():
                         ind_jlm = ti(j,l,m) # current index, no need to calculate every time
                         self.C_vector[ind_jlm] = self.dt*self.C*(con_array_for_find[0]**-6+con_array_for_find[1]**-6)*self.dx**-6
                         if self.C_vector[ind_jlm] > 0.5 :
-                            # choose 0.5 as critical factor when linear approximation of exponential breaks down
+                            # choose 0.5 (= 1-0.5) as critical factor when linear approximation of exponential breaks down
                             self.C_vector[ind_jlm] = 0.5
                         self.D_vector[ind_jlm] = quenched_diffusion(con_array_for_find[0]*self.dx,self.centers.tau,self.centers.bfield)
                             
@@ -1402,11 +1403,12 @@ class RelaxExperiment():
         if self.fake:
             self.magn = np.exp(-20*self.timearray/self.evolution_time)
         else:
-            progress = Progress(self.time_steps/1000)
+            progress = Progress(self.time_steps/100)
             for step in range(self.time_steps):
                 self.lattice = self.B_matrix*self.lattice     # calculate time step
                 self.magn[step+1] = calc_magn(self.lattice,self.M_vector)   # calculate magnetization
-                if step%1000 == 999:
+                if step%100 == 9:
+                    print "determ: current magnetization:",self.magn[step+1]
                     if self.magn[step+1] < 1e-4:
                         self.magn[step+2:self.time_steps+1] = 0
                         break

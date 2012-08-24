@@ -16,8 +16,8 @@ from relaxsim import *
 # RENAME ME PLEASE!!
 name = "compare_"
 
-size = 3e-8
-evo_time = 1e+2
+size = 2.85e-8
+evo_time = 1e+1
 walks = 200
 tau=1e-4
 density = 1e24
@@ -28,7 +28,7 @@ ax = fig.add_subplot(111)
 T1densdet = []
 T1densrw = []
 
-for bfield in np.array([1e-3,1e-2,1e-1,1e0,1e1]):
+for bfield in np.array([1e-3,1e-2,1e-1,1e0]):
     # constants
     #bfield = 1.2
     print 'field is now:', bfield, " T"
@@ -37,12 +37,6 @@ for bfield in np.array([1e-3,1e-2,1e-1,1e0,1e1]):
 
     ceninst = RelaxCenters(size,C,D,b,density,name=name+"{:.2}".format(density))
     print ceninst
-
-    rwexp = RelaxExperiment(ceninst,evo_time,method="randomwalks",walk_type='continuous')
-    rwexp.run_experiment(walks=walks)
-    rwresult = RelaxResult(experiment=rwexp,logscale=True)
-    rwresult.plot_data(axes=ax,ploterror=True,label="random "+"$B_0 = \SI{"+"{:.2e}".format(bfield)+"}{T}$",logx=True)
-    filename = rwresult.write_hdf()
     
     detexp = RelaxExperiment(ceninst,evo_time,method="deterministic")
     detexp.run_experiment()
@@ -51,7 +45,19 @@ for bfield in np.array([1e-3,1e-2,1e-1,1e0,1e1]):
     filename = detresult.write_hdf()
 
     T1densdet.append([detresult.density, detresult.fitT1, detresult.fitT1err, detresult.fitbeta, detresult.fitbetaerr])
+    del detresult
+    del detexp
+    rwexp = RelaxExperiment(ceninst,evo_time,method="randomwalks",walk_type='continuous')
+    rwexp.run_experiment(walks=walks)
+    rwresult = RelaxResult(experiment=rwexp,logscale=True)
+    rwresult.plot_data(axes=ax,ploterror=True,label="random "+"$B_0 = \SI{"+"{:.2e}".format(bfield)+"}{T}$",logx=True)
+    filename = rwresult.write_hdf()
+    
     T1densrw.append([ rwresult.density,  rwresult.fitT1,  rwresult.fitT1err,  rwresult.fitbeta,  rwresult.fitbetaerr])
+    del rwresult
+    del rwexp
+    
+
 
 
 ax.legend(loc=3,prop=dict(size=12))
@@ -74,5 +80,5 @@ ax2.legend(prop=dict(size=15))
 fig2.savefig(name+'t1.pdf',format='pdf')
 
 np.savetxt("det,T1,T1err,beta,betaerr",T1densdet.transpose())
-np.savetxt("det,T1,T1err,beta,betaerr",T1densrw.transpose())
+np.savetxt("rw,T1,T1err,beta,betaerr",T1densrw.transpose())
 

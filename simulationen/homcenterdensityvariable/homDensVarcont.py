@@ -25,7 +25,7 @@ for dens in range(len(densvec)):
     
     thisname = name+','+'dens'+"{:.4}".format(density)+',magn.pdf'
 
-    ceninst = RelaxCenters(size,C,D,b,density, tau=tau, bfield=bfield,distribution="hom",halo_rad=None,name=name,\
+    ceninst = RelaxCenters(size,C,D,b,density, tau=tau, bfield=bfield,distribution="hom",halo_rad=None,name=thisname,\
     centerpositions=None,trackvec = None)
 
     experiment = RelaxExperiment(ceninst, evo_time, dxb_ratio=1/6., method="randomwalks",fake=False,walk_type="continuous")
@@ -49,5 +49,5 @@ for dens in range(len(densvec)):
     
 T1dens = np.array(T1dens)
 
-np.savetxt("dens,T1,T1err,beta,betaerr.txt",T1dens)
+np.savetxt("contdens,T1,T1err,beta,betaerr.txt",T1dens)
 
